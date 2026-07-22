@@ -1,0 +1,301 @@
+{
+  "version": "0.1",
+  "metadata": {
+    "title": "咖啡店落地页",
+    "description": "一个简洁的咖啡店落地页示例，展示 GenUI DSL v0.1 的核心能力"
+  },
+  "root": {
+    "id": "page",
+    "type": "Page",
+    "props": {
+      "title": "Brew & Bean Coffee"
+    },
+    "children": [
+      {
+        "id": "hero",
+        "type": "Section",
+        "props": {
+          "ariaLabel": "欢迎区域"
+        },
+        "style": {
+          "padding": "64px",
+          "textAlign": "center",
+          "backgroundColor": "#f9f5f0"
+        },
+        "children": [
+          {
+            "id": "hero.title",
+            "type": "Heading",
+            "props": {
+              "text": "Brew & Bean",
+              "level": 1
+            },
+            "style": {
+              "fontSize": "48px",
+              "fontWeight": "bold",
+              "color": "#2c1810"
+            }
+          },
+          {
+            "id": "hero.subtitle",
+            "type": "Text",
+            "props": {
+              "text": "每一杯都是匠心之作，从产地到杯中的精品咖啡体验"
+            },
+            "style": {
+              "fontSize": "18px",
+              "color": "#5c4033"
+            }
+          },
+          {
+            "id": "hero.image",
+            "type": "Image",
+            "props": {
+              "src": "/images/hero-coffee.jpg",
+              "alt": "精品咖啡拉花特写"
+            },
+            "style": {
+              "width": "100%",
+              "borderRadius": "12px",
+              "margin": "24px"
+            }
+          },
+          {
+            "id": "hero.primary-button",
+            "type": "Button",
+            "props": {
+              "text": "查看菜单",
+              "variant": "primary"
+            },
+            "style": {
+              "fontSize": "16px"
+            }
+          }
+        ]
+      },
+      {
+        "id": "menu",
+        "type": "Section",
+        "props": {
+          "ariaLabel": "精选菜单"
+        },
+        "style": {
+          "padding": "48px",
+          "gap": "24px"
+        },
+        "children": [
+          {
+            "id": "menu.title",
+            "type": "Heading",
+            "props": {
+              "text": "精选饮品",
+              "level": 2
+            },
+            "style": {
+              "textAlign": "center",
+              "color": "#2c1810"
+            }
+          },
+          {
+            "id": "menu.card-1",
+            "type": "Card",
+            "props": {
+              "title": "经典拿铁"
+            },
+            "style": {
+              "padding": "16px",
+              "borderRadius": "8px"
+            },
+            "children": [
+              {
+                "id": "menu.card-1.image",
+                "type": "Image",
+                "props": {
+                  "src": "/images/latte.jpg",
+                  "alt": "经典拿铁"
+                },
+                "style": {
+                  "width": "100%",
+                  "borderRadius": "8px"
+                }
+              },
+              {
+                "id": "menu.card-1.name",
+                "type": "Heading",
+                "props": {
+                  "text": "经典拿铁",
+                  "level": 3
+                }
+              },
+              {
+                "id": "menu.card-1.desc",
+                "type": "Text",
+                "props": {
+                  "text": "丝滑浓缩与绵密奶泡的完美融合"
+                }
+              }
+            ]
+          },
+          {
+            "id": "menu.card-2",
+            "type": "Card",
+            "props": {
+              "title": "手冲单品"
+            },
+            "style": {
+              "padding": "16px",
+              "borderRadius": "8px"
+            },
+            "children": [
+              {
+                "id": "menu.card-2.image",
+                "type": "Image",
+                "props": {
+                  "src": "/images/pourover.jpg",
+                  "alt": "手冲单品咖啡"
+                },
+                "style": {
+                  "width": "100%",
+                  "borderRadius": "8px"
+                }
+              },
+              {
+                "id": "menu.card-2.name",
+                "type": "Heading",
+                "props": {
+                  "text": "手冲单品",
+                  "level": 3
+                }
+              },
+              {
+                "id": "menu.card-2.desc",
+                "type": "Text",
+                "props": {
+                  "text": "埃塞俄比亚耶加雪菲，花香果韵"
+                }
+              }
+            ]
+          },
+          {
+            "id": "menu.card-3",
+            "type": "Card",
+            "props": {
+              "title": "冷萃咖啡"
+            },
+            "style": {
+              "padding": "16px",
+              "borderRadius": "8px"
+            },
+            "children": [
+              {
+                "id": "menu.card-3.image",
+                "type": "Image",
+                "props": {
+                  "src": "/images/coldbrew.jpg",
+                  "alt": "冷萃咖啡"
+                },
+                "style": {
+                  "width": "100%",
+                  "borderRadius": "8px"
+                }
+              },
+              {
+                "id": "menu.card-3.name",
+                "type": "Heading",
+                "props": {
+                  "text": "冷萃咖啡",
+                  "level": 3
+                }
+              },
+              {
+                "id": "menu.card-3.desc",
+                "type": "Text",
+                "props": {
+                  "text": "12小时低温慢萃，顺滑不苦涩"
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "contact",
+        "type": "Section",
+        "props": {
+          "ariaLabel": "联系我们"
+        },
+        "style": {
+          "padding": "48px",
+          "backgroundColor": "#f9f5f0"
+        },
+        "children": [
+          {
+            "id": "contact.title",
+            "type": "Heading",
+            "props": {
+              "text": "联系我们",
+              "level": 2
+            },
+            "style": {
+              "textAlign": "center",
+              "color": "#2c1810"
+            }
+          },
+          {
+            "id": "contact.form",
+            "type": "Form",
+            "props": {
+              "name": "contact-form"
+            },
+            "style": {
+              "gap": "16px",
+              "padding": "24px"
+            },
+            "children": [
+              {
+                "id": "contact.form.name",
+                "type": "Input",
+                "props": {
+                  "name": "name",
+                  "label": "您的姓名",
+                  "inputType": "text",
+                  "placeholder": "请输入姓名",
+                  "required": true
+                }
+              },
+              {
+                "id": "contact.form.email",
+                "type": "Input",
+                "props": {
+                  "name": "email",
+                  "label": "电子邮箱",
+                  "inputType": "email",
+                  "placeholder": "your@email.com",
+                  "required": true
+                }
+              },
+              {
+                "id": "contact.form.phone",
+                "type": "Input",
+                "props": {
+                  "name": "phone",
+                  "label": "联系电话",
+                  "inputType": "tel",
+                  "placeholder": "可选"
+                }
+              },
+              {
+                "id": "contact.form.submit",
+                "type": "Button",
+                "props": {
+                  "text": "提交",
+                  "variant": "primary"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,1024 @@
+{
+  "$defs": {
+    "ButtonNode": {
+      "additionalProperties": false,
+      "description": "Button 节点 — 叶子",
+      "properties": {
+        "id": {
+          "description": "节点唯一标识符，格式：小写字母开头，段间用 . 或 - 分隔",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[.\\-][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "props": {
+          "$ref": "#/$defs/ButtonProps"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Style"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "Button",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "props"
+      ],
+      "title": "ButtonNode",
+      "type": "object"
+    },
+    "ButtonProps": {
+      "additionalProperties": false,
+      "description": "Button 组件属性，禁止事件字段",
+      "properties": {
+        "disabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Disabled"
+        },
+        "text": {
+          "maxLength": 200,
+          "title": "Text",
+          "type": "string"
+        },
+        "variant": {
+          "anyOf": [
+            {
+              "enum": [
+                "primary",
+                "secondary",
+                "ghost"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Variant"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "ButtonProps",
+      "type": "object"
+    },
+    "CardNode": {
+      "additionalProperties": false,
+      "description": "Card 节点 — 容器",
+      "properties": {
+        "children": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "Button": "#/$defs/ButtonNode",
+                "Card": "#/$defs/CardNode",
+                "Form": "#/$defs/FormNode",
+                "Heading": "#/$defs/HeadingNode",
+                "Image": "#/$defs/ImageNode",
+                "Input": "#/$defs/InputNode",
+                "Page": "#/$defs/PageNode",
+                "Section": "#/$defs/SectionNode",
+                "Text": "#/$defs/TextNode"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/PageNode"
+              },
+              {
+                "$ref": "#/$defs/SectionNode"
+              },
+              {
+                "$ref": "#/$defs/HeadingNode"
+              },
+              {
+                "$ref": "#/$defs/TextNode"
+              },
+              {
+                "$ref": "#/$defs/ButtonNode"
+              },
+              {
+                "$ref": "#/$defs/ImageNode"
+              },
+              {
+                "$ref": "#/$defs/CardNode"
+              },
+              {
+                "$ref": "#/$defs/FormNode"
+              },
+              {
+                "$ref": "#/$defs/InputNode"
+              }
+            ]
+          },
+          "title": "Children",
+          "type": "array"
+        },
+        "id": {
+          "description": "节点唯一标识符，格式：小写字母开头，段间用 . 或 - 分隔",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[.\\-][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "props": {
+          "$ref": "#/$defs/CardProps"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Style"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "Card",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "CardNode",
+      "type": "object"
+    },
+    "CardProps": {
+      "additionalProperties": false,
+      "description": "Card 组件属性",
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "title": "CardProps",
+      "type": "object"
+    },
+    "DslMetadata": {
+      "additionalProperties": false,
+      "description": "文档元数据，仅允许预定义字段",
+      "properties": {
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "title": "DslMetadata",
+      "type": "object"
+    },
+    "FormNode": {
+      "additionalProperties": false,
+      "description": "Form 节点 — 容器",
+      "properties": {
+        "children": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "Button": "#/$defs/ButtonNode",
+                "Card": "#/$defs/CardNode",
+                "Form": "#/$defs/FormNode",
+                "Heading": "#/$defs/HeadingNode",
+                "Image": "#/$defs/ImageNode",
+                "Input": "#/$defs/InputNode",
+                "Page": "#/$defs/PageNode",
+                "Section": "#/$defs/SectionNode",
+                "Text": "#/$defs/TextNode"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/PageNode"
+              },
+              {
+                "$ref": "#/$defs/SectionNode"
+              },
+              {
+                "$ref": "#/$defs/HeadingNode"
+              },
+              {
+                "$ref": "#/$defs/TextNode"
+              },
+              {
+                "$ref": "#/$defs/ButtonNode"
+              },
+              {
+                "$ref": "#/$defs/ImageNode"
+              },
+              {
+                "$ref": "#/$defs/CardNode"
+              },
+              {
+                "$ref": "#/$defs/FormNode"
+              },
+              {
+                "$ref": "#/$defs/InputNode"
+              }
+            ]
+          },
+          "title": "Children",
+          "type": "array"
+        },
+        "id": {
+          "description": "节点唯一标识符，格式：小写字母开头，段间用 . 或 - 分隔",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[.\\-][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "props": {
+          "$ref": "#/$defs/FormProps"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Style"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "Form",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "FormNode",
+      "type": "object"
+    },
+    "FormProps": {
+      "additionalProperties": false,
+      "description": "Form 组件属性",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "maxLength": 128,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        }
+      },
+      "title": "FormProps",
+      "type": "object"
+    },
+    "HeadingNode": {
+      "additionalProperties": false,
+      "description": "Heading 节点 — 叶子",
+      "properties": {
+        "id": {
+          "description": "节点唯一标识符，格式：小写字母开头，段间用 . 或 - 分隔",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[.\\-][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "props": {
+          "$ref": "#/$defs/HeadingProps"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Style"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "Heading",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "props"
+      ],
+      "title": "HeadingNode",
+      "type": "object"
+    },
+    "HeadingProps": {
+      "additionalProperties": false,
+      "description": "Heading 组件属性",
+      "properties": {
+        "level": {
+          "maximum": 6,
+          "minimum": 1,
+          "title": "Level",
+          "type": "integer"
+        },
+        "text": {
+          "maxLength": 2000,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "level"
+      ],
+      "title": "HeadingProps",
+      "type": "object"
+    },
+    "ImageNode": {
+      "additionalProperties": false,
+      "description": "Image 节点 — 叶子",
+      "properties": {
+        "id": {
+          "description": "节点唯一标识符，格式：小写字母开头，段间用 . 或 - 分隔",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[.\\-][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "props": {
+          "$ref": "#/$defs/ImageProps"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Style"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "Image",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "props"
+      ],
+      "title": "ImageNode",
+      "type": "object"
+    },
+    "ImageProps": {
+      "additionalProperties": false,
+      "description": "Image 组件属性，禁止 javascript:/vbscript: URL",
+      "properties": {
+        "alt": {
+          "maxLength": 200,
+          "title": "Alt",
+          "type": "string"
+        },
+        "src": {
+          "maxLength": 2048,
+          "title": "Src",
+          "type": "string"
+        }
+      },
+      "required": [
+        "src",
+        "alt"
+      ],
+      "title": "ImageProps",
+      "type": "object"
+    },
+    "InputNode": {
+      "additionalProperties": false,
+      "description": "Input 节点 — 叶子",
+      "properties": {
+        "id": {
+          "description": "节点唯一标识符，格式：小写字母开头，段间用 . 或 - 分隔",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[.\\-][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "props": {
+          "$ref": "#/$defs/InputProps"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Style"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "Input",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "props"
+      ],
+      "title": "InputNode",
+      "type": "object"
+    },
+    "InputProps": {
+      "additionalProperties": false,
+      "description": "Input 组件属性",
+      "properties": {
+        "inputType": {
+          "anyOf": [
+            {
+              "enum": [
+                "text",
+                "email",
+                "tel",
+                "number"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Inputtype"
+        },
+        "label": {
+          "maxLength": 200,
+          "title": "Label",
+          "type": "string"
+        },
+        "name": {
+          "maxLength": 128,
+          "title": "Name",
+          "type": "string"
+        },
+        "placeholder": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Placeholder"
+        },
+        "required": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Required"
+        }
+      },
+      "required": [
+        "name",
+        "label"
+      ],
+      "title": "InputProps",
+      "type": "object"
+    },
+    "PageNode": {
+      "additionalProperties": false,
+      "description": "Page 节点 — 必须且只能作为根节点",
+      "properties": {
+        "children": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "Button": "#/$defs/ButtonNode",
+                "Card": "#/$defs/CardNode",
+                "Form": "#/$defs/FormNode",
+                "Heading": "#/$defs/HeadingNode",
+                "Image": "#/$defs/ImageNode",
+                "Input": "#/$defs/InputNode",
+                "Page": "#/$defs/PageNode",
+                "Section": "#/$defs/SectionNode",
+                "Text": "#/$defs/TextNode"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/PageNode"
+              },
+              {
+                "$ref": "#/$defs/SectionNode"
+              },
+              {
+                "$ref": "#/$defs/HeadingNode"
+              },
+              {
+                "$ref": "#/$defs/TextNode"
+              },
+              {
+                "$ref": "#/$defs/ButtonNode"
+              },
+              {
+                "$ref": "#/$defs/ImageNode"
+              },
+              {
+                "$ref": "#/$defs/CardNode"
+              },
+              {
+                "$ref": "#/$defs/FormNode"
+              },
+              {
+                "$ref": "#/$defs/InputNode"
+              }
+            ]
+          },
+          "title": "Children",
+          "type": "array"
+        },
+        "id": {
+          "description": "节点唯一标识符，格式：小写字母开头，段间用 . 或 - 分隔",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[.\\-][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "props": {
+          "$ref": "#/$defs/PageProps"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Style"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "Page",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "PageNode",
+      "type": "object"
+    },
+    "PageProps": {
+      "additionalProperties": false,
+      "description": "Page 组件属性",
+      "properties": {
+        "title": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        }
+      },
+      "title": "PageProps",
+      "type": "object"
+    },
+    "SectionNode": {
+      "additionalProperties": false,
+      "description": "Section 节点 — 容器",
+      "properties": {
+        "children": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "Button": "#/$defs/ButtonNode",
+                "Card": "#/$defs/CardNode",
+                "Form": "#/$defs/FormNode",
+                "Heading": "#/$defs/HeadingNode",
+                "Image": "#/$defs/ImageNode",
+                "Input": "#/$defs/InputNode",
+                "Page": "#/$defs/PageNode",
+                "Section": "#/$defs/SectionNode",
+                "Text": "#/$defs/TextNode"
+              },
+              "propertyName": "type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/PageNode"
+              },
+              {
+                "$ref": "#/$defs/SectionNode"
+              },
+              {
+                "$ref": "#/$defs/HeadingNode"
+              },
+              {
+                "$ref": "#/$defs/TextNode"
+              },
+              {
+                "$ref": "#/$defs/ButtonNode"
+              },
+              {
+                "$ref": "#/$defs/ImageNode"
+              },
+              {
+                "$ref": "#/$defs/CardNode"
+              },
+              {
+                "$ref": "#/$defs/FormNode"
+              },
+              {
+                "$ref": "#/$defs/InputNode"
+              }
+            ]
+          },
+          "title": "Children",
+          "type": "array"
+        },
+        "id": {
+          "description": "节点唯一标识符，格式：小写字母开头，段间用 . 或 - 分隔",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[.\\-][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "props": {
+          "$ref": "#/$defs/SectionProps"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Style"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "Section",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type"
+      ],
+      "title": "SectionNode",
+      "type": "object"
+    },
+    "SectionProps": {
+      "additionalProperties": false,
+      "description": "Section 组件属性",
+      "properties": {
+        "ariaLabel": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Arialabel"
+        }
+      },
+      "title": "SectionProps",
+      "type": "object"
+    },
+    "Style": {
+      "additionalProperties": false,
+      "description": "受控样式模型，仅允许预定义的安全 CSS 属性",
+      "properties": {
+        "backgroundColor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backgroundcolor"
+        },
+        "borderRadius": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Borderradius"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        },
+        "fontSize": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fontsize"
+        },
+        "fontWeight": {
+          "anyOf": [
+            {
+              "enum": [
+                "normal",
+                "medium",
+                "semibold",
+                "bold"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fontweight"
+        },
+        "gap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gap"
+        },
+        "height": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height"
+        },
+        "margin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Margin"
+        },
+        "padding": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Padding"
+        },
+        "textAlign": {
+          "anyOf": [
+            {
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Textalign"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width"
+        }
+      },
+      "title": "Style",
+      "type": "object"
+    },
+    "TextNode": {
+      "additionalProperties": false,
+      "description": "Text 节点 — 叶子",
+      "properties": {
+        "id": {
+          "description": "节点唯一标识符，格式：小写字母开头，段间用 . 或 - 分隔",
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[a-z][a-z0-9]*(?:[.\\-][a-z0-9]+)*$",
+          "title": "Id",
+          "type": "string"
+        },
+        "props": {
+          "$ref": "#/$defs/TextProps"
+        },
+        "style": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Style"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "const": "Text",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "props"
+      ],
+      "title": "TextNode",
+      "type": "object"
+    },
+    "TextProps": {
+      "additionalProperties": false,
+      "description": "Text 组件属性",
+      "properties": {
+        "text": {
+          "maxLength": 2000,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "TextProps",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "DSL v0.1 文档顶层结构",
+  "properties": {
+    "metadata": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/DslMetadata"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "root": {
+      "$ref": "#/$defs/PageNode"
+    },
+    "version": {
+      "const": "0.1",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "version",
+    "root"
+  ],
+  "title": "DslDocument",
+  "type": "object",
+  "x-dsl-version": "0.1"
+}

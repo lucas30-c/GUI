@@ -1,0 +1,56 @@
+{
+  "$defs": {
+    "UpdatePropsOperation": {
+      "additionalProperties": false,
+      "description": "单个 update_props 操作",
+      "properties": {
+        "op": {
+          "const": "update_props",
+          "title": "Op",
+          "type": "string"
+        },
+        "props": {
+          "additionalProperties": true,
+          "title": "Props",
+          "type": "object"
+        },
+        "targetNodeId": {
+          "minLength": 1,
+          "title": "Targetnodeid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "targetNodeId",
+        "props"
+      ],
+      "title": "UpdatePropsOperation",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Patch v0.1 文档顶层结构",
+  "properties": {
+    "operations": {
+      "items": {
+        "$ref": "#/$defs/UpdatePropsOperation"
+      },
+      "minItems": 1,
+      "title": "Operations",
+      "type": "array"
+    },
+    "version": {
+      "const": "0.1",
+      "title": "Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "version",
+    "operations"
+  ],
+  "title": "PatchDocument",
+  "type": "object",
+  "x-patch-version": "0.1"
+}
