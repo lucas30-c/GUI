@@ -107,6 +107,28 @@ M1-03 完成。**Patch HTTP API 尚未实现**——当前仅可通过 Python �
 | 422 | `invalid_dsl_business_rule` | 业务规则校验错误 |
 | 500 | Internal Server Error | 未预期内部异常（兜底） |
 
+## 4.2 前端模块 (Frontend Module) — M2 新增
+
+### 模块位置
+
+`frontend/`
+
+### 技术栈
+
+React + TypeScript + Vite
+
+### 关键架构点
+
+- **DSL Types 为 Discriminated Union**：前端手写 TS 类型（D4 决策），JSON Schema 保持为契约事实来源。
+- **递归 DslRenderer**：单一 React 组件根据节点 `type` 递归渲染整棵 DSL 树为语义 HTML。
+- **Style 白名单映射器**：纯函数，将 DSL Style 对象转为 React CSSProperties，仅允许 11 个白名单字段。
+- **selectedNodeId 存储于 React state**（D1 决策：useState，不引入外部状态库），永远不写入 DSL。
+- **Gold Case 静态加载**：当前直接导入 `examples/dsl/coffee-shop-landing.json`，无后端请求。
+
+### 当前状态
+
+M2 完成。**尚未实现**：后端集成、Patch API 调用、模型接入、对话功能。
+
 ## 5. 共享契约 (Shared Contracts)
 
 前后端共享的契约（第一版以文档 + JSON Schema 形式定义，双端各自维护类型）：
@@ -231,7 +253,7 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 | M1-01 | DSL 契约 + 校验核心 | contracts/dsl/v0.1/schema.json、Pydantic 模型、校验逻辑、pytest 用例 | ✅ 完成 |
 | M1-02 | DSL 校验 API | FastAPI 应用、/health、/api/v1/dsl/validate 端点、错误分类 | ✅ 完成 |
 | M1-03 | Controlled Patch 核心 | Patch 数据模型、apply_patch 引擎、contracts/patch/v0.1/schema.json、pytest 用例 | ✅ 完成 |
-| M2 | 前端骨架 + 渲染 + 选中交互 | 可渲染静态 DSL、可选中控件 | 待启动 |
+| M2 | 前端骨架 + 渲染 + 选中交互 | DslRenderer、节点选中、Info Panel、Vitest 用例 | ✅ 完成 |
 | M3 | Patch 管线 + Mock Provider 闭环 | 局部精修端到端（Mock）、零变更校验可见 | 待启动 |
 | M4 | 多轮会话与指标 | 对话状态、Trace、指标采集与展示 | 待启动 |
 | M5 | 模板推荐与自进化 | 模拟数据、沉淀/推荐/更新闭环 | 待启动 |
@@ -243,8 +265,8 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 
 | # | 待决策项 | 为什么暂不决定 | 最晚决定时点 | 决策人 |
 |---|----------|----------------|--------------|--------|
-| D1 | 前端状态管理库（React 自带状态 / Zustand / Redux 等） | M2 前端骨架开始前无实际需求；过早选型违反"最简可测试"原则 | M2 开始前 | 项目所有者 |
+| D1 | 前端状态管理库 | **已决策（M2）**：使用 React useState 管理 selectedNodeId，不引入外部状态库。理由：当前只有单一选中态，复杂度不足以证明引入第三方库 | — | 项目所有者 |
 | D2 | 真实模型供应商与具体型号 | Mock 优先策略下不影响 M1–M5；且涉及密钥与成本 | M6 开始前 | 项目所有者 |
 | D3 | 是否引入 SQLite | 本地 JSON 未暴露查询瓶颈；M5 模板库规模扩大后再评估 | M5 进行中评估，M6 前落定 | 项目所有者（依 Agent 建议） |
-| D4 | 双端契约类型的维护方式（JSON Schema 生成 vs 手写同步） | 取决于契约复杂度，M1 落地 DSL Schema 时一并确定 | M1 结束前 | 项目所有者（依 Agent 建议） |
+| D4 | 双端契约类型的维护方式 | **已决策（M2）**：手写 TS 类型，JSON Schema 保持为契约事实来源。理由：组件数量有限，手写类型可读性优于自动生成，且可利用 discriminated union | — | 项目所有者 |
 | D5 | embedding 检索是否引入及其依赖 | 规则/关键词匹配可能已够用；引入新依赖需审批闸门 | M5 开始前 | 项目所有者 |

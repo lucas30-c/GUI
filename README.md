@@ -2,7 +2,7 @@
 
 一句话介绍：用户用自然语言生成并多轮精修网页的受控 GenUI 原型——页面由受控 JSON DSL 驱动，模型只能通过结构化 Patch 修改用户选中的控件，其余部分零漂移。
 
-**当前状态**：M1-03 完成（Controlled Patch 核心已就绪；DSL 契约、校验核心、HTTP 校验端点、Patch 应用引擎均可用）。Patch HTTP API 尚未实现。
+**当前状态**：M2 完成（前端骨架、DSL 渲染器、节点选中交互已就绪）。后端 M1-03 Controlled Patch 核心可用。**尚未集成后端**——当前前端仅加载静态 Gold Case，Patch HTTP API 未实现，无模型/对话功能。
 
 ## 核心原则
 
@@ -25,6 +25,7 @@
 | [specs/001-dsl-contract-and-validation.md](specs/001-dsl-contract-and-validation.md) | M1-01 DSL 契约与校验核心 |
 | [specs/002-dsl-validation-api.md](specs/002-dsl-validation-api.md) | M1-02 DSL 校验 API |
 | [specs/003-controlled-patch-core.md](specs/003-controlled-patch-core.md) | M1-03 Controlled Patch 核心 |
+| [specs/004-frontend-dsl-renderer-selection.md](specs/004-frontend-dsl-renderer-selection.md) | M2 前端 DSL 渲染器与选中交互 |
 
 ## 计划中的技术栈
 
@@ -41,7 +42,20 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-### 运行测试
+### 前端开发
+
+```bash
+cd frontend
+npm install
+npm run dev        # development server
+npm run build      # production build
+npm run typecheck  # TypeScript check
+npm test           # run tests
+```
+
+M2 交付内容：渲染全部 9 种 DSL 组件（Page / Section / Heading / Text / Button / Image / Card / Form / Input）、点击/键盘节点选中、Info Panel 展示选中节点信息。
+
+### 运行测试（后端）
 
 ```bash
 cd backend
@@ -105,8 +119,8 @@ patched = apply_patch(source_doc, patch)  # 返回校验通过的 DslDocument
 
 ## 尚未实现
 
-前端应用、Patch HTTP API、模型接入、模板机制、指标面板——全部待后续 Spec 驱动开发。
+后端集成（前端当前仅静态 Gold Case）、Patch HTTP API、模型接入、模板机制、指标面板——全部待后续 Spec 驱动开发。
 
 ## 下一里程碑
 
-**M2 — 前端骨架 + 渲染 + 选中交互**：可渲染静态 DSL、可选中控件。详见 [docs/ARCHITECTURE.md §17](docs/ARCHITECTURE.md)。
+**M3 — Patch 管线 + Mock Provider 闭环**：局部精修端到端（Mock）、零变更校验可见。详见 [docs/ARCHITECTURE.md §17](docs/ARCHITECTURE.md)。
