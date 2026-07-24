@@ -67,6 +67,7 @@ FastAPI 应用由 `genui_api.main:app` 导出，内部通过 `create_app()` 工�
 |------|------|------|
 | GET | /health | 健康检查 |
 | POST | /api/v1/dsl/validate | DSL 文档校验 |
+| POST | /api/v1/dsl/refine | 局部精修（Refinement Pipeline + Provider） |
 
 ### 职责边界
 
@@ -106,6 +107,40 @@ M1-03 完成。**Patch HTTP API 尚未实现**——当前仅可通过 Python �
 | 422 | `invalid_dsl_structure` | Pydantic 结构校验错误 |
 | 422 | `invalid_dsl_business_rule` | 业务规则校验错误 |
 | 500 | Internal Server Error | 未预期内部异常（兜底） |
+
+## 4.3 Provider 模块 (Provider Module) — M3 新增
+
+### 模块位置
+
+`backend/src/genui_api/provider/`
+
+### 职责
+
+定义 RefinementProvider Protocol 和具体实现（当前为 MockProvider）。Provider 接收 RefinementContext（选中节点信息 + 指令），返回候选 Patch dict（不可信，需校验）。
+
+### 关键设计
+
+- **Protocol 定义**：使用 `typing.Protocol`，任何具有匹配签名的类自动满足接口。
+- **最小权限**：RefinementContext 仅暴露选中节点相关信息，不传递完整文档。
+- **MockProvider**：确定性映射，无网络、无随机、无密钥。根据 `selected_node_type` 选择合法文案字段。
+- **依赖注入**：通过 FastAPI Depends + `create_app(refinement_provider)` 注入，可测试。
+
+## 4.4 Refinement 模块 (Refinement Module) — M3 新增
+
+### 模块位置
+
+`backend/src/genui_api/refinement/`
+
+### 职责
+
+无状态异步编排函数 `refine()`，实现 10 步 Refinement Pipeline：校验指令 → 校验源文档 → 查找节点 → 构造上下文 → 调用 Provider → 校验候选结构 → 边界检查 → 应用 Patch → 完整性验证 → 返回结果。
+
+### 关键设计
+
+- **不可变输入**：不修改传入的 document 和 instruction。
+- **可信 ID**：使用原始 selected_node_id 做边界检查，不受 Provider 修改 context 影响。
+- **深拷贝 props**：传给 Provider 的 selected_node_props 是深拷贝，Provider 修改不影响原始文档。
+- **完整性验证**：使用 `model_dump(mode="json", by_alias=True)` 序列化后移除目标 props 再做全量深等比较。
 
 ## 4.2 前端模块 (Frontend Module) — M2 新增
 
@@ -254,7 +289,8 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 | M1-02 | DSL 校验 API | FastAPI 应用、/health、/api/v1/dsl/validate 端点、错误分类 | ✅ 完成 |
 | M1-03 | Controlled Patch 核心 | Patch 数据模型、apply_patch 引擎、contracts/patch/v0.1/schema.json、pytest 用例 | ✅ 完成 |
 | M2 | 前端骨架 + 渲染 + 选中交互 | DslRenderer、节点选中、Info Panel、Vitest 用例 | ✅ 完成 |
-| M3 | Patch 管线 + Mock Provider 闭环 | 局部精修端到端（Mock）、零变更校验可见 | 待启动 |
+| M3-01 | Refinement Pipeline + Mock Provider + Refine API | 后端局部精修管线、Mock Provider、POST /api/v1/dsl/refine、零变更校验 | ✅ 完成 |
+| M3-02 | 前后端局部精修闭环 | 前端集成 Refine API、对话式精修 UI | 待启动 |
 | M4 | 多轮会话与指标 | 对话状态、Trace、指标采集与展示 | 待启动 |
 | M5 | 模板推荐与自进化 | 模拟数据、沉淀/推荐/更新闭环 | 待启动 |
 | M6 | 真实模型接入 + 演示打磨 | 真实 Provider、Playwright 回归、演示彩排 | 待启动 |

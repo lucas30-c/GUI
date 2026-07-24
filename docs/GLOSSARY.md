@@ -35,7 +35,10 @@
 | **Validation Pipeline** | 校验管线：Schema Validation → Business Rule Validation → Patch Boundary Validation → 应用到副本 → Integrity Check → Commit。任一环节失败即整轮拒绝。 |
 | **Integrity Check** | 非目标子树完整性校验：对非目标节点做规范化序列化 + 哈希（或等价深比较），证明 Patch 只改了 Target Node。 |
 | **Model Provider** | 模型能力的统一接口：输入结构化意图与上下文，输出 Candidate Output。不负责裁决，只负责"翻译"。 |
+| **RefinementProvider** | Model Provider 的精修专用 Protocol（`typing.Protocol`）。定义 `async def generate_patch(context: RefinementContext) -> dict`，返回候选 Patch dict。 |
+| **RefinementContext** | 传递给 RefinementProvider 的受控上下文数据类。包含 instruction、selected_node_id、selected_node_type、selected_node_props（深拷贝）、document_version。不含完整文档（最小权限原则）。 |
 | **Mock Provider** | Model Provider 的确定性实现：用规则/预置响应模拟模型行为，与真实模型同接口，保证无外部依赖的演示路径。 |
+| **Refinement Pipeline** | 无状态异步编排函数 `refine()`，10 步确定性流程：校验指令 → 校验源文档 → 查找节点 → 构造上下文 → 调用 Provider → 校验候选结构 → 边界检查 → 应用 Patch → 完整性验证 → 返回结果。 |
 | **Trace** | 一轮对话的完整记录：输入、候选输出、各环节校验结果、应用结果、指标数据点。用于排错、指标计算与模板沉淀。 |
 
 ## 模板与指标
@@ -55,3 +58,11 @@
 | **selectedNodeId** | 前端状态，跟踪当前被选中的 DSL 节点；永远不写入 DSL。 |
 | **Style Mapper** | 纯函数，将 DSL Style 对象转换为 React CSSProperties，仅允许白名单字段通过。 |
 | **Info Panel** | 只读侧边栏，展示当前选中节点的 id、type 和 props。 |
+
+## 精修 API
+
+| 术语 | 定义 |
+|------|------|
+| **Refine Endpoint** | `POST /api/v1/dsl/refine`，局部精修 API。接收当前文档、selectedNodeId 和自然语言指令，通过 Refinement Pipeline 返回已验证的新文档和 Patch。 |
+| **Candidate Boundary Violation** | 候选 Patch 中存在指向非 selectedNodeId 的操作，被边界检查拦截。 |
+| **Non-target Mutation** | 应用 Patch 后，非目标节点发生了意外变化，被完整性校验发现。 |

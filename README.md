@@ -2,7 +2,7 @@
 
 一句话介绍：用户用自然语言生成并多轮精修网页的受控 GenUI 原型——页面由受控 JSON DSL 驱动，模型只能通过结构化 Patch 修改用户选中的控件，其余部分零漂移。
 
-**当前状态**：M2 完成（前端骨架、DSL 渲染器、节点选中交互已就绪）。后端 M1-03 Controlled Patch 核心可用。**尚未集成后端**——当前前端仅加载静态 Gold Case，Patch HTTP API 未实现，无模型/对话功能。
+**当前状态**：M3-01 完成（后端 Refinement Pipeline + Mock Provider + Refine API）。`POST /api/v1/dsl/refine` 端点已交付，后端局部精修管线可用。前端 M2 渲染器与选中交互就绪。M3-02（前后端局部精修闭环）待启动。**尚未集成前后端**——当前前端仅加载静态 Gold Case，尚无对话式精修 UI。
 
 ## 核心原则
 
@@ -26,6 +26,7 @@
 | [specs/002-dsl-validation-api.md](specs/002-dsl-validation-api.md) | M1-02 DSL 校验 API |
 | [specs/003-controlled-patch-core.md](specs/003-controlled-patch-core.md) | M1-03 Controlled Patch 核心 |
 | [specs/004-frontend-dsl-renderer-selection.md](specs/004-frontend-dsl-renderer-selection.md) | M2 前端 DSL 渲染器与选中交互 |
+| [specs/005-refinement-pipeline-mock-provider-api.md](specs/005-refinement-pipeline-mock-provider-api.md) | M3-01 Refinement Pipeline + Mock Provider + Refine API |
 
 ## 计划中的技术栈
 
@@ -84,6 +85,7 @@ uvicorn genui_api.main:app --reload
 |------|------|------|
 | GET | /health | 健康检查 |
 | POST | /api/v1/dsl/validate | DSL 文档校验 |
+| POST | /api/v1/dsl/refine | 局部精修（Mock Provider） |
 
 ### Patch v0.1 最小示例
 
@@ -119,8 +121,8 @@ patched = apply_patch(source_doc, patch)  # 返回校验通过的 DslDocument
 
 ## 尚未实现
 
-后端集成（前端当前仅静态 Gold Case）、Patch HTTP API、模型接入、模板机制、指标面板——全部待后续 Spec 驱动开发。
+前后端集成（前端当前仅静态 Gold Case，M3-02 待启动）、对话式精修 UI、模型接入、多轮对话、模板机制、指标面板——全部待后续 Spec 驱动开发。
 
 ## 下一里程碑
 
-**M3 — Patch 管线 + Mock Provider 闭环**：局部精修端到端（Mock）、零变更校验可见。详见 [docs/ARCHITECTURE.md §17](docs/ARCHITECTURE.md)。
+**M3-02 — 前后端局部精修闭环**：前端集成 Refine API、对话式精修 UI。详见 [docs/ARCHITECTURE.md §17](docs/ARCHITECTURE.md)。
