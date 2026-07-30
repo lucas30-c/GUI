@@ -11,3 +11,7 @@ dist/
 frontend/node_modules/
 frontend/dist/
 *.tsbuildinfo
+
+# Playwright 产物
+frontend/test-results/
+frontend/playwright-report/

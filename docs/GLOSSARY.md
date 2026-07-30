@@ -66,3 +66,18 @@
 | **Refine Endpoint** | `POST /api/v1/dsl/refine`，局部精修 API。接收当前文档、selectedNodeId 和自然语言指令，通过 Refinement Pipeline 返回已验证的新文档和 Patch。 |
 | **Candidate Boundary Violation** | 候选 Patch 中存在指向非 selectedNodeId 的操作，被边界检查拦截。 |
 | **Non-target Mutation** | 应用 Patch 后，非目标节点发生了意外变化，被完整性校验发现。 |
+
+## 前端精修闭环
+
+| 术语 | 定义 |
+|------|------|
+| **API Client（refineNode）** | 前端唯一的精修请求函数。发出 `POST /api/v1/dsl/refine`，把网络 JSON 当作 `unknown`，只经类型守卫收窄，返回判别联合 `RefineClientResult`，任何路径都不向调用者抛异常。 |
+| **RefineClientResult** | API Client 的返回联合类型，按 `kind` 判别：`success`（结构检查通过）、`server`（服务端业务失败，已净化）、`local`（前端侧失败）。 |
+| **本地错误码（Local Error Code）** | 前端自行判定的三类失败：`network_error`（请求未发出或连接失败）、`invalid_json`（响应体不是合法 JSON）、`invalid_response`（响应结构或 HTTP 状态与 success 不一致）。消息为前端固定文案，不回显请求/响应内容与异常堆栈。 |
+| **Envelope 一致性检查** | HTTP 状态与 `success` 字段必须一致：2xx 对应 `true`、非 2xx 对应 `false`；两者矛盾或 `success` 缺失/非 boolean 一律判为 `invalid_response`。 |
+| **RefinementIntegrity** | 响应中的完整性声明：`selectedNodeId` + `nonTargetNodesUnchanged`。API Client 只校验其为 boolean；`false` 会被放行到提交层再拒绝。 |
+| **VerifiedRefinementIntegrity** | `nonTargetNodesUnchanged` 已收窄为字面量 `true` 的完整性声明。只能通过真实条件检查获得，不得用类型断言伪造。 |
+| **提交层完整性检查** | 提交前的三道额外校验：`nonTargetNodesUnchanged === true`、`integrity.selectedNodeId` 等于提交快照、返回文档中确实存在该节点。任一不通过即拒绝本轮结果。 |
+| **原子提交（REFINE_SUCCESS）** | 唯一写入 `currentDocument` / `lastPatch` / `lastIntegrity` / `lastSuccess` 的 action。全部检查通过后一次 dispatch 完成，不存在"文档已更新但结果面板未更新"的中间态。 |
+| **提交快照（Submit Snapshot）** | 发起请求时捕获的 `document` / `selectedNodeId` / `instruction`。响应校验与提交全程使用快照值，不使用响应到达时的当前 state。 |
+| **旧响应丢弃（Stale Response Discard）** | 请求进行中用户切换了选中节点时，返回的旧响应被丢弃：不触发原子提交、不覆盖当前选择与上一轮结果，仅结束 loading。判定依据是与选择交互同步写入的最新选中节点引用。 |

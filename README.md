@@ -2,7 +2,7 @@
 
 一句话介绍：用户用自然语言生成并多轮精修网页的受控 GenUI 原型——页面由受控 JSON DSL 驱动，模型只能通过结构化 Patch 修改用户选中的控件，其余部分零漂移。
 
-**当前状态**：M3-01 完成（后端 Refinement Pipeline + Mock Provider + Refine API）。`POST /api/v1/dsl/refine` 端点已交付，后端局部精修管线可用。前端 M2 渲染器与选中交互就绪。M3-02（前后端局部精修闭环）待启动。**尚未集成前后端**——当前前端仅加载静态 Gold Case，尚无对话式精修 UI。
+**当前状态**：M3-02 完成（前后端局部精修闭环）。前端已集成 `POST /api/v1/dsl/refine`：选中节点 → 输入 `set_text:` 指令 → 提交 → 完整性检查通过后整文档替换，非目标区域零变更。前端永不应用 `response.patch`（Patch 仅用于结果展示），完整性校验未通过的响应一律拒绝。Playwright E2E 覆盖真实前后端连续两轮精修。M4（多轮会话与指标）待启动。
 
 ## 核心原则
 
@@ -121,8 +121,8 @@ patched = apply_patch(source_doc, patch)  # 返回校验通过的 DslDocument
 
 ## 尚未实现
 
-前后端集成（前端当前仅静态 Gold Case，M3-02 待启动）、对话式精修 UI、模型接入、多轮对话、模板机制、指标面板——全部待后续 Spec 驱动开发。
+自由自然语言理解（当前仅支持 `set_text:` 前缀指令）、真实模型接入、多轮对话上下文、模板机制、指标面板、Undo/Redo——全部待后续 Spec 驱动开发。
 
 ## 下一里程碑
 
-**M3-02 — 前后端局部精修闭环**：前端集成 Refine API、对话式精修 UI。详见 [docs/ARCHITECTURE.md §17](docs/ARCHITECTURE.md)。
+**M4 — 多轮会话与指标**：对话状态、Trace、指标采集与展示。详见 [docs/ARCHITECTURE.md §17](docs/ARCHITECTURE.md)。

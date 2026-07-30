@@ -290,7 +290,7 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 | M1-03 | Controlled Patch 核心 | Patch 数据模型、apply_patch 引擎、contracts/patch/v0.1/schema.json、pytest 用例 | ✅ 完成 |
 | M2 | 前端骨架 + 渲染 + 选中交互 | DslRenderer、节点选中、Info Panel、Vitest 用例 | ✅ 完成 |
 | M3-01 | Refinement Pipeline + Mock Provider + Refine API | 后端局部精修管线、Mock Provider、POST /api/v1/dsl/refine、零变更校验 | ✅ 完成 |
-| M3-02 | 前后端局部精修闭环 | 前端集成 Refine API、对话式精修 UI | 待启动 |
+| M3-02 | 前后端局部精修闭环 | 前端 API Client、useReducer 原子提交、精修面板 UI、Vite dev proxy、Playwright E2E 两轮闭环 | ✅ 完成 |
 | M4 | 多轮会话与指标 | 对话状态、Trace、指标采集与展示 | 待启动 |
 | M5 | 模板推荐与自进化 | 模拟数据、沉淀/推荐/更新闭环 | 待启动 |
 | M6 | 真实模型接入 + 演示打磨 | 真实 Provider、Playwright 回归、演示彩排 | 待启动 |

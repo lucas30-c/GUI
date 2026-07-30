@@ -209,6 +209,118 @@ form[data-node-type="Form"] {
   flex-direction: column;
 }
 
+/* Refinement Panel */
+.refine-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.refine-instruction {
+  display: block;
+  width: 100%;
+  min-height: 84px;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1e293b;
+  background-color: #ffffff;
+  resize: vertical;
+}
+
+.refine-counter {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #94a3b8;
+  text-align: right;
+}
+
+.refine-submit {
+  width: 100%;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+  background-color: #2563eb;
+  cursor: pointer;
+}
+
+.refine-submit:disabled {
+  background-color: #cbd5e1;
+  color: #64748b;
+  cursor: not-allowed;
+}
+
+.refine-loading {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.refine-result {
+  margin-bottom: 12px;
+  padding: 10px;
+  border-radius: 6px;
+  background-color: #e2e8f0;
+  font-size: 12px;
+  color: #1e293b;
+  word-break: break-all;
+}
+
+.refine-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.refine-patch-list {
+  list-style: none;
+}
+
+.refine-patch-list li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 6px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.refine-patch-list pre {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.refine-owner {
+  font-size: 12px;
+  color: #64748b;
+  margin-bottom: 12px;
+}
+
+.refine-error {
+  padding: 10px;
+  border-radius: 6px;
+  background-color: #fee2e2;
+  color: #b91c1c;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.refine-error .refine-label {
+  color: #b91c1c;
+}
+
+.refine-error ul {
+  margin-top: 6px;
+  padding-left: 16px;
+}
+
 /* Responsive: narrow screens stack vertically */
 @media (max-width: 768px) {
   .workbench-main {
