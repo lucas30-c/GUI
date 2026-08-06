@@ -2,7 +2,7 @@
 
 一句话介绍：用户用自然语言生成并多轮精修网页的受控 GenUI 原型——页面由受控 JSON DSL 驱动，模型只能通过结构化 Patch 修改用户选中的控件，其余部分零漂移。
 
-**当前状态**：M3-02 完成（前后端局部精修闭环）。前端已集成 `POST /api/v1/dsl/refine`：选中节点 → 输入 `set_text:` 指令 → 提交 → 完整性检查通过后整文档替换，非目标区域零变更。前端永不应用 `response.patch`（Patch 仅用于结果展示），完整性校验未通过的响应一律拒绝。Playwright E2E 覆盖真实前后端连续两轮精修。M4（多轮会话与指标）待启动。
+**当前状态**：M4-01 完成（一句话生成网页初稿纵向切片）。顶部输入一句自然语言需求 → `POST /api/v1/dsl/generate` 经确定性 Mock Generation Provider 产出候选 DSL → 通过完整 Schema 与业务规则校验后返回初稿 → 前端原子替换渲染，随后可直接进入 M3-02 局部精修闭环（选中节点 → `set_text:` 指令 → `POST /api/v1/dsl/refine` → 完整性检查通过后整文档替换，非目标区域零变更）。前端永不本地拼装或修改 DSL，也永不应用 `response.patch`（Patch 仅用于结果展示）。Playwright E2E 覆盖真实前后端「生成 → 选择 → 精修」全链路。
 
 ## 核心原则
 
@@ -27,6 +27,8 @@
 | [specs/003-controlled-patch-core.md](specs/003-controlled-patch-core.md) | M1-03 Controlled Patch 核心 |
 | [specs/004-frontend-dsl-renderer-selection.md](specs/004-frontend-dsl-renderer-selection.md) | M2 前端 DSL 渲染器与选中交互 |
 | [specs/005-refinement-pipeline-mock-provider-api.md](specs/005-refinement-pipeline-mock-provider-api.md) | M3-01 Refinement Pipeline + Mock Provider + Refine API |
+| [specs/006-frontend-refinement-loop.md](specs/006-frontend-refinement-loop.md) | M3-02 前端局部精修闭环 |
+| [specs/007-initial-dsl-generation.md](specs/007-initial-dsl-generation.md) | M4-01 一句话生成网页初稿纵向切片 |
 
 ## 计划中的技术栈
 
@@ -85,6 +87,7 @@ uvicorn genui_api.main:app --reload
 |------|------|------|
 | GET | /health | 健康检查 |
 | POST | /api/v1/dsl/validate | DSL 文档校验 |
+| POST | /api/v1/dsl/generate | 一句话生成初稿（Mock Generation Provider） |
 | POST | /api/v1/dsl/refine | 局部精修（Mock Provider） |
 
 ### Patch v0.1 最小示例
@@ -121,8 +124,14 @@ patched = apply_patch(source_doc, patch)  # 返回校验通过的 DslDocument
 
 ## 尚未实现
 
-自由自然语言理解（当前仅支持 `set_text:` 前缀指令）、真实模型接入、多轮对话上下文、模板机制、指标面板、Undo/Redo——全部待后续 Spec 驱动开发。
+自由自然语言理解（生成侧当前为确定性关键词映射，精修侧仅支持 `set_text:` 前缀指令）、真实模型接入、SP/UP 提示词策略、多类 Patch、多轮对话上下文、模板推荐与自进化、指标面板、Undo/Redo——全部待后续 Spec 驱动开发。
 
-## 下一里程碑
+## 里程碑路线
 
-**M4 — 多轮会话与指标**：对话状态、Trace、指标采集与展示。详见 [docs/ARCHITECTURE.md §17](docs/ARCHITECTURE.md)。
+| 里程碑 | 最新定义 |
+|--------|----------|
+| M4 | 完成 PDF 任务一：一句话生成初稿、真实模型接入、SP/UP（系统提示词/用户提示词）策略、自然语言局部精修、多类 Patch、多轮上下文 |
+| M5 | 完成 PDF 任务二：模板推荐、自进化、指标、个性化、冷启动 |
+| M6 | 完整面试交付：覆盖矩阵、设计文档、架构图、Demo 脚本、追问题库、降级预案 |
+
+M4 已交付的纵向切片：**M4-01 一句话生成网页初稿纵向切片**（本轮）。里程碑细节详见 [docs/ARCHITECTURE.md §17](docs/ARCHITECTURE.md)。

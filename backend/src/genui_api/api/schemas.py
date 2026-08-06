@@ -91,3 +91,28 @@ class RefineFailure(BaseModel):
 
     success: Literal[False]
     error: ValidationErrorDetail
+
+
+# --- Generate API Models ---
+
+
+class GenerateRequest(BaseModel):
+    """POST /api/v1/dsl/generate 请求体。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    prompt: str
+
+
+class GenerateSuccess(BaseModel):
+    """初稿生成成功响应。"""
+
+    success: Literal[True]
+    document: dict  # DslDocument.model_dump(mode="json")
+
+
+class GenerateFailure(BaseModel):
+    """初稿生成失败响应。"""
+
+    success: Literal[False]
+    error: ValidationErrorDetail

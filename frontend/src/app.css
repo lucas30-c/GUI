@@ -51,6 +51,81 @@ body {
   overflow: hidden;
 }
 
+/* Generation Bar（顶部一句话生成区） */
+.generate-bar {
+  flex-shrink: 0;
+  padding: 12px 24px;
+  background-color: #f1f5f9;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.generate-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.generate-prompt {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 14px;
+  color: #1e293b;
+  background-color: #ffffff;
+}
+
+.generate-submit {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+  background-color: #0f766e;
+  cursor: pointer;
+}
+
+.generate-submit:disabled {
+  background-color: #cbd5e1;
+  color: #64748b;
+  cursor: not-allowed;
+}
+
+.generate-counter {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #94a3b8;
+  text-align: right;
+}
+
+.generate-loading {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.generate-error {
+  margin-top: 8px;
+  padding: 10px;
+  border-radius: 6px;
+  background-color: #fee2e2;
+  color: #b91c1c;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.generate-error .refine-label {
+  color: #b91c1c;
+}
+
+.generate-error ul {
+  margin-top: 6px;
+  padding-left: 16px;
+}
+
 /* Canvas */
 .workbench-canvas {
   flex: 1;

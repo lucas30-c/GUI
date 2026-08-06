@@ -6,7 +6,10 @@ import { ErrorBoundary } from './dsl/ErrorBoundary';
 import type { DslDocument, DslNode } from './dsl';
 import { isDslDocumentShape, refineNode } from './api/refine';
 import type { Fetcher } from './api/refine';
+import { generateDraft } from './api/generate';
 import type {
+  GenerateLocalError,
+  GenerateServerError,
   PatchDocument,
   RefinementIntegrity,
   RefineLocalError,
@@ -16,6 +19,9 @@ import type {
 
 /** instruction 前端长度上限，与后端对齐（DD-7） */
 export const MAX_INSTRUCTION_LENGTH = 1000;
+
+/** prompt 前端长度上限，与后端 MAX_PROMPT_LENGTH 同值（DD-5@007） */
+export const MAX_PROMPT_LENGTH = 500;
 
 /** 提交层完整性检查失败文案（前端自有固定文案，不含服务端原文或 document 内容） */
 export const INTEGRITY_ERROR_MESSAGES = {
@@ -61,6 +67,10 @@ interface RefinementState {
   loading: boolean;
   error: RefineServerError | RefineLocalError | null;
   instruction: string;
+  // --- 生成侧状态（与精修侧 loading / error 分离，DD-17） ---
+  prompt: string;
+  generateLoading: boolean;
+  generateError: GenerateServerError | GenerateLocalError | null;
 }
 
 type RefinementAction =
@@ -75,7 +85,12 @@ type RefinementAction =
       selectedNodeId: string;
     }
   | { type: 'REFINE_FAILURE'; error: RefineServerError | RefineLocalError }
-  | { type: 'REFINE_END' };
+  | { type: 'REFINE_END' }
+  | { type: 'SET_PROMPT'; prompt: string }
+  | { type: 'GENERATE_START' }
+  | { type: 'GENERATE_SUCCESS'; document: DslDocument }
+  | { type: 'GENERATE_FAILURE'; error: GenerateServerError | GenerateLocalError }
+  | { type: 'GENERATE_END' };
 
 const initialState: RefinementState = {
   currentDocument: goldCase,
@@ -86,6 +101,9 @@ const initialState: RefinementState = {
   loading: false,
   error: null,
   instruction: '',
+  prompt: '',
+  generateLoading: false,
+  generateError: null,
 };
 
 function refinementReducer(
@@ -121,6 +139,36 @@ function refinementReducer(
 
     case 'REFINE_END':
       return { ...state, loading: false };
+
+    case 'SET_PROMPT':
+      return { ...state, prompt: action.prompt };
+
+    case 'GENERATE_START':
+      return { ...state, generateLoading: true, generateError: null };
+
+    // 唯一的初稿提交入口：单次 dispatch 原子设置 9 项（DD-18）
+    case 'GENERATE_SUCCESS': {
+      const generatedDocument = action.document;
+      return {
+        ...state,
+        currentDocument: generatedDocument,
+        selectedNodeId: null,
+        lastPatch: null,
+        lastIntegrity: null,
+        lastSuccess: null,
+        error: null,
+        instruction: '',
+        prompt: '',
+        generateError: null,
+      };
+    }
+
+    // 结构上只触碰 generateError：旧文档与精修成功状态一律不被污染
+    case 'GENERATE_FAILURE':
+      return { ...state, generateError: action.error };
+
+    case 'GENERATE_END':
+      return { ...state, generateLoading: false };
   }
 }
 
@@ -139,6 +187,8 @@ function App({ fetcher }: AppProps) {
   const latestSelectedNodeIdRef = useRef<string | null>(null);
   // in-flight 守卫：保证同时只有一个精修请求（DD-22）
   const inFlightRef = useRef(false);
+  // 生成侧 in-flight 守卫：与 inFlightRef 共同构成双同步互斥事实来源（DD-20）
+  const generateInFlightRef = useRef(false);
 
   const selectedNode = state.selectedNodeId
     ? findNodeById(state.currentDocument.root, state.selectedNodeId)
@@ -147,9 +197,17 @@ function App({ fetcher }: AppProps) {
   const trimmedInstruction = state.instruction.trim();
   const canSubmit =
     !state.loading &&
+    !state.generateLoading &&
     state.selectedNodeId !== null &&
     trimmedInstruction.length > 0 &&
     state.instruction.length <= MAX_INSTRUCTION_LENGTH;
+
+  const trimmedPrompt = state.prompt.trim();
+  const canGenerate =
+    !state.generateLoading &&
+    !state.loading &&
+    trimmedPrompt.length > 0 &&
+    trimmedPrompt.length <= MAX_PROMPT_LENGTH;
 
   function handleSelect(nodeId: string) {
     latestSelectedNodeIdRef.current = nodeId;
@@ -158,6 +216,8 @@ function App({ fetcher }: AppProps) {
 
   async function submitRefinement() {
     if (inFlightRef.current) return;
+    // 跨链路同步互斥：生成在途时禁止精修提交（DD-20）
+    if (generateInFlightRef.current) return;
 
     // 步骤 1：捕获快照
     const snapshot = {
@@ -254,12 +314,111 @@ function App({ fetcher }: AppProps) {
     void submitRefinement();
   }
 
+  /** 生成提交固定 7 步（Spec 007「生成提交过程」） */
+  async function submitGeneration() {
+    // 步骤 1：同步守卫（事实来源是 ref，不是 state）
+    if (generateInFlightRef.current) return;
+    if (inFlightRef.current) return;
+    const prompt = state.prompt.trim();
+    if (prompt.length === 0) return;
+    if (prompt.length > MAX_PROMPT_LENGTH) return;
+
+    // 步骤 2：先设置生成侧 in-flight ref
+    generateInFlightRef.current = true;
+    // 步骤 3：后 dispatch START
+    dispatch({ type: 'GENERATE_START' });
+
+    try {
+      // 步骤 4：发送 trim 后的 prompt
+      const result = await generateDraft({ prompt }, fetcher);
+
+      // 步骤 6：失败（server / local）只更新生成侧错误
+      if (result.kind !== 'success') {
+        dispatch({ type: 'GENERATE_FAILURE', error: result });
+        return;
+      }
+
+      // 步骤 5：同一同步路径中先重置选择 ref（DD-19），再原子提交
+      latestSelectedNodeIdRef.current = null;
+      dispatch({ type: 'GENERATE_SUCCESS', document: result.document });
+    } finally {
+      // 步骤 7：释放 ref 并结束 loading
+      generateInFlightRef.current = false;
+      dispatch({ type: 'GENERATE_END' });
+    }
+  }
+
+  function handleGenerateClick() {
+    if (!canGenerate) return;
+    void submitGeneration();
+  }
+
+  function handlePromptKeyDown(event: KeyboardEvent<HTMLInputElement>) {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    if (!canGenerate) return;
+    void submitGeneration();
+  }
+
   return (
     <div className="workbench">
       <header className="workbench-header">
         <h1>GenUI</h1>
-        <span className="status">局部精修（Mock Provider）</span>
+        <span className="status">初稿生成 + 局部精修（Mock Provider）</span>
       </header>
+      <section className="generate-bar">
+        <div className="generate-row">
+          <input
+            type="text"
+            className="generate-prompt"
+            data-testid="generate-prompt"
+            aria-label="初稿需求"
+            placeholder="用一句话描述你要的网页，例如：我要一个咖啡店的落地页（Enter 提交）"
+            value={state.prompt}
+            onChange={(event) =>
+              dispatch({ type: 'SET_PROMPT', prompt: event.target.value })
+            }
+            onKeyDown={handlePromptKeyDown}
+          />
+          <button
+            type="button"
+            className="generate-submit"
+            data-testid="generate-submit"
+            disabled={!canGenerate}
+            onClick={handleGenerateClick}
+          >
+            {state.generateLoading ? '生成中...' : '生成初稿'}
+          </button>
+        </div>
+        <p className="generate-counter" data-testid="generate-counter">
+          {state.prompt.length} / {MAX_PROMPT_LENGTH}
+        </p>
+        {state.generateLoading ? (
+          <p className="generate-loading" data-testid="generate-loading">
+            生成中...
+          </p>
+        ) : null}
+        {state.generateError !== null ? (
+          <div className="generate-error" data-testid="generate-error">
+            <p className="refine-label">初稿生成失败</p>
+            <p data-testid="generate-error-kind">
+              {state.generateError.kind === 'server' ? '服务端错误' : '本地错误'}
+            </p>
+            <p data-testid="generate-error-code">{state.generateError.code}</p>
+            <p data-testid="generate-error-message">{state.generateError.message}</p>
+            {state.generateError.kind === 'server' &&
+            state.generateError.issues.length > 0 ? (
+              <ul data-testid="generate-error-issues">
+                {state.generateError.issues.map((issue, index) => (
+                  <li key={`${issue.path}-${index}`} data-testid="generate-error-issue">
+                    {issue.path} · {issue.code} · {issue.message}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
       <div className="workbench-main">
         <div className="workbench-canvas">
           <ErrorBoundary>

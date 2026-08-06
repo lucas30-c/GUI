@@ -111,3 +111,37 @@ export type RefineClientResult =
   | RefineClientSuccess
   | RefineServerError
   | RefineLocalError;
+
+// --- 初稿生成契约类型（Spec 007「前端 API 契约」）---
+
+/** 初稿生成请求 */
+export interface GenerateRequest {
+  prompt: string;
+}
+
+/** 生成成功结果：document 已通过 API Client 层最小运行时结构检查 */
+export interface GenerateClientSuccess {
+  kind: "success";
+  document: DslDocument;
+}
+
+/** 生成服务端结构化失败（HTTP 非 2xx + success:false），字段已净化 */
+export interface GenerateServerError {
+  kind: "server";
+  code: string;
+  message: string;
+  issues: ValidationIssue[];   // 缺失时为 []
+}
+
+/** 生成本地错误：复用 RefineLocalErrorCode（三类语义完全相同） */
+export interface GenerateLocalError {
+  kind: "local";
+  code: RefineLocalErrorCode;  // "network_error" | "invalid_json" | "invalid_response"
+  message: string;             // 前端自有固定文案
+}
+
+/** 生成 API Client 对外返回的 discriminated union */
+export type GenerateClientResult =
+  | GenerateClientSuccess
+  | GenerateServerError
+  | GenerateLocalError;

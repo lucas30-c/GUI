@@ -67,6 +67,7 @@ FastAPI 应用由 `genui_api.main:app` 导出，内部通过 `create_app()` 工�
 |------|------|------|
 | GET | /health | 健康检查 |
 | POST | /api/v1/dsl/validate | DSL 文档校验 |
+| POST | /api/v1/dsl/generate | 一句话生成初稿（Generation Pipeline + Generation Provider） |
 | POST | /api/v1/dsl/refine | 局部精修（Refinement Pipeline + Provider） |
 
 ### 职责边界
@@ -141,6 +142,25 @@ M1-03 完成。**Patch HTTP API 尚未实现**——当前仅可通过 Python �
 - **可信 ID**：使用原始 selected_node_id 做边界检查，不受 Provider 修改 context 影响。
 - **深拷贝 props**：传给 Provider 的 selected_node_props 是深拷贝，Provider 修改不影响原始文档。
 - **完整性验证**：使用 `model_dump(mode="json", by_alias=True)` 序列化后移除目标 props 再做全量深等比较。
+
+## 4.5 Generation 模块 (Generation Module) — M4-01 新增
+
+### 模块位置
+
+`backend/src/genui_api/generation/`
+
+### 职责
+
+一句话需求 → 初稿 DSL Document 的最小生成链路：`base.py` 定义 GenerationProvider Protocol 与 UnrecognizedIntentError，`mock.py` 为确定性 Mock 实现，`templates.py` 存放三套独立内置初稿模板，`pipeline.py` 提供无状态异步编排函数 `generate_document()`。
+
+### 关键设计
+
+- **Protocol 定义**：`async def generate_draft(self, prompt: str) -> dict`，与 RefinementProvider 同构，可替换为真实模型实现。
+- **不可信候选**：Provider 输出一律视为不可信候选，必须经 `contracts/validation.py` 的 `validate_dsl_document()` 这一唯一校验入口，生成侧不复制任何校验规则。
+- **Pipeline 六步**：校验 prompt → 调用 Provider → 捕获 UnrecognizedIntentError → 捕获 Provider 异常 → 校验候选文档 → 返回结果。
+- **确定性 Mock 映射**：`strip()` + `lower()` 子串匹配，固定优先级 咖啡店 > 活动报名 > 产品介绍；无匹配抛出 UnrecognizedIntentError，不做静默兜底。
+- **模板隔离**：每次返回 `copy.deepcopy(模板常量)`，避免跨请求污染。
+- **错误分类**：`invalid_prompt` → 400、`unrecognized_intent` → 422、`invalid_generated_document` / `provider_error` → 502，由 API 层独立的 `_GENERATION_ERROR_HTTP_MAP` 映射，不影响精修侧映射表。
 
 ## 4.2 前端模块 (Frontend Module) — M2 新增
 
@@ -291,9 +311,10 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 | M2 | 前端骨架 + 渲染 + 选中交互 | DslRenderer、节点选中、Info Panel、Vitest 用例 | ✅ 完成 |
 | M3-01 | Refinement Pipeline + Mock Provider + Refine API | 后端局部精修管线、Mock Provider、POST /api/v1/dsl/refine、零变更校验 | ✅ 完成 |
 | M3-02 | 前后端局部精修闭环 | 前端 API Client、useReducer 原子提交、精修面板 UI、Vite dev proxy、Playwright E2E 两轮闭环 | ✅ 完成 |
-| M4 | 多轮会话与指标 | 对话状态、Trace、指标采集与展示 | 待启动 |
-| M5 | 模板推荐与自进化 | 模拟数据、沉淀/推荐/更新闭环 | 待启动 |
-| M6 | 真实模型接入 + 演示打磨 | 真实 Provider、Playwright 回归、演示彩排 | 待启动 |
+| M4-01 | 一句话生成网页初稿纵向切片 | Generation Provider 抽象、确定性 Mock 初稿模板、Generation Pipeline、POST /api/v1/dsl/generate、前端生成入口与生成→精修串联 E2E | ✅ 完成 |
+| M4 | 完成 PDF 任务一：一句话生成初稿、真实模型接入、SP/UP（系统提示词/用户提示词）策略、自然语言局部精修、多类 Patch、多轮上下文 | 真实 Provider、提示词策略、自然语言指令解析、多类 Patch 操作、多轮上下文 | 进行中（M4-01 已完成） |
+| M5 | 完成 PDF 任务二：模板推荐、自进化、指标、个性化、冷启动 | 模板库、沉淀/推荐/更新闭环、指标采集与展示、个性化与冷启动策略 | 待启动 |
+| M6 | 完整面试交付：覆盖矩阵、设计文档、架构图、Demo 脚本、追问题库、降级预案 | 需求覆盖矩阵、设计文档、架构图、Demo 脚本、追问题库、降级预案 | 待启动 |
 
 ## 待决策项 (Open Decisions)
 
