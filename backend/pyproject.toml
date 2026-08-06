@@ -1,5 +1,6 @@
 # GenUI 后端包：DSL 契约与确定性校验（M1-01）
-# 依赖边界：仅 pydantic(v2) 运行依赖 + pytest 开发依赖（任务书授权）
+# 依赖边界：pydantic(v2) + fastapi + uvicorn + openai(OpenAI 兼容传输层) 运行依赖
+#           + pytest / httpx 开发依赖（M4-02 §6 审批通过）
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
@@ -13,6 +14,9 @@ dependencies = [
     "pydantic>=2,<3",
     "fastapi>=0.115,<1",
     "uvicorn>=0.30,<1",
+    # OpenAI-compatible Chat Completions 协议客户端（transport 层）。
+    # 不代表模型来自 OpenAI：Qwen / Kimi / DeepSeek / GLM 均通过该协议接入（Spec 008 DD-1）。
+    "openai>=2.0,<3",
 ]
 
 [project.optional-dependencies]
@@ -26,3 +30,6 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "real_llm: 需要真实模型凭证的 opt-in smoke 测试；必须显式设置 GENUI_RUN_REAL_LLM=1 才会执行（默认 skip，零真实网络调用）",
+]

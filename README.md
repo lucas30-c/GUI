@@ -81,14 +81,59 @@ source .venv/bin/activate
 uvicorn genui_api.main:app --reload
 ```
 
+### 模型配置（Mock / 真实模型）
+
+系统同时支持**确定性 Mock**与**真实模型**两条 Provider 实现，两者满足同一个 Provider Protocol，走**同一条校验管线**：
+
+| GENUI_MODEL_PROVIDER | 行为 |
+|---|---|
+| 未设置 / `mock`（默认） | Mock Provider：完全离线、确定性、无凭证、无网络请求 |
+| `openai_compatible` | 真实模型：通过 OpenAI 兼容的 Chat Completions 协议调用 |
+
+> `openai_compatible` 描述的是**传输协议**，不是厂商。Qwen / 阿里云百炼、Kimi、DeepSeek、GLM 都通过该协议接入，因此环境变量全部使用 provider-neutral 命名（`GENUI_LLM_*`），不出现任何厂商前缀。
+
+配置读取方式：应用**只读取进程环境变量**。本项目**不引入 `python-dotenv`**，因此 `.env` 文件**不会被自动加载**——[`.env.example`](.env.example) 的角色是**配置模板与文档**（列出变量名、含义与占位符），不是运行时配置源。
+
+启用真实模型时，需把变量**导出到运行进程的环境**中，例如：
+
+```bash
+# 方式一：在当前 shell 中 export 后启动（同一 shell 内后续命令均可见）
+export GENUI_MODEL_PROVIDER=openai_compatible
+export GENUI_LLM_API_KEY=<API_KEY>
+export GENUI_LLM_BASE_URL=<BASE_URL>
+export GENUI_GENERATION_MODEL=<MODEL>
+# 可选：精修侧单独指定模型，不设置时继承生成侧
+# export GENUI_REFINEMENT_MODEL=<MODEL>
+uvicorn genui_api.main:app --reload
+
+# 方式二：只对单条命令生效（不污染 shell）
+env GENUI_MODEL_PROVIDER=openai_compatible GENUI_LLM_API_KEY=<API_KEY> \
+    GENUI_LLM_BASE_URL=<BASE_URL> GENUI_GENERATION_MODEL=<MODEL> \
+    uvicorn genui_api.main:app --reload
+```
+
+开发环境推荐做法：复制 `.env.example` 为本地的 `.env`（已被 `.gitignore` 忽略，切勿提交凭证），再用**外部工具**把它注入进程环境——手动 `set -a && source .env && set +a`，或使用 `direnv` 等工具自动完成。注入责任在 shell / 工具侧，应用侧不做隐式文件读取。
+
+`openai_compatible` 模式下 Key / BaseURL / Model 三项全部必需且**无默认模型名**；缺任一项在应用启动阶段即失败（fail fast），不会留到首个请求才暴露。
+
+**首次 Demo 推荐使用阿里云百炼（Qwen 系列）**：国内网络直连稳定、OpenAI 兼容端点开箱可用、JSON 输出稳定性足以支撑本项目的结构化契约。BaseURL 与模型名请以所选厂商官方文档为准，不要混用不同厂商的端点与模型名。
+
+真实模型 smoke 测试默认跳过，需显式 opt-in（会产生真实调用与费用）：
+
+```bash
+GENUI_RUN_REAL_LLM=1 pytest tests/llm/test_real_smoke.py -v
+```
+
+裸 `pytest` 恒为零真实网络调用：即使 shell 中已存在真实凭证，测试夹具也会剥离模型环境变量并跳过所有 `real_llm` 用例。
+
 ### API 端点
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | /health | 健康检查 |
 | POST | /api/v1/dsl/validate | DSL 文档校验 |
-| POST | /api/v1/dsl/generate | 一句话生成初稿（Mock Generation Provider） |
-| POST | /api/v1/dsl/refine | 局部精修（Mock Provider） |
+| POST | /api/v1/dsl/generate | 一句话生成初稿（Mock 或真实模型，由 GENUI_MODEL_PROVIDER 决定） |
+| POST | /api/v1/dsl/refine | 局部精修（Mock 或真实模型，由 GENUI_MODEL_PROVIDER 决定） |
 
 ### Patch v0.1 最小示例
 
@@ -124,7 +169,9 @@ patched = apply_patch(source_doc, patch)  # 返回校验通过的 DslDocument
 
 ## 尚未实现
 
-自由自然语言理解（生成侧当前为确定性关键词映射，精修侧仅支持 `set_text:` 前缀指令）、真实模型接入、SP/UP 提示词策略、多类 Patch、多轮对话上下文、模板推荐与自进化、指标面板、Undo/Redo——全部待后续 Spec 驱动开发。
+多类 Patch（当前仅 `update_props`）、通过 Patch 修改节点 `style`、多轮对话上下文、模板推荐与自进化、指标面板、Undo/Redo——全部待后续 Spec 驱动开发。
+
+真实模型已接入（M4-02），但前端 UI 仍不提供模型切换入口：切换靠环境变量。Mock Provider 保留为离线基线，不被真实模型替代。
 
 ## 里程碑路线
 
@@ -134,4 +181,4 @@ patched = apply_patch(source_doc, patch)  # 返回校验通过的 DslDocument
 | M5 | 完成 PDF 任务二：模板推荐、自进化、指标、个性化、冷启动 |
 | M6 | 完整面试交付：覆盖矩阵、设计文档、架构图、Demo 脚本、追问题库、降级预案 |
 
-M4 已交付的纵向切片：**M4-01 一句话生成网页初稿纵向切片**（本轮）。里程碑细节详见 [docs/ARCHITECTURE.md §17](docs/ARCHITECTURE.md)。
+M4 已交付的纵向切片：**M4-01 一句话生成网页初稿纵向切片**、**M4-02 真实模型接入与 SP/UP 提示词策略**（本轮）。里程碑细节详见 [docs/ARCHITECTURE.md §17](docs/ARCHITECTURE.md)。

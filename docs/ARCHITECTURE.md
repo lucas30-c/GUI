@@ -162,6 +162,26 @@ M1-03 完成。**Patch HTTP API 尚未实现**——当前仅可通过 Python �
 - **模板隔离**：每次返回 `copy.deepcopy(模板常量)`，避免跨请求污染。
 - **错误分类**：`invalid_prompt` → 400、`unrecognized_intent` → 422、`invalid_generated_document` / `provider_error` → 502，由 API 层独立的 `_GENERATION_ERROR_HTTP_MAP` 映射，不影响精修侧映射表。
 
+## 4.6 LLM 模块 (LLM Module) — M4-02 新增
+
+### 模块位置
+
+`backend/src/genui_api/llm/`（`client.py` 配置与客户端工厂、`prompts.py` 集中式提示词构造）
+真实 Provider 实现分别位于 `generation/openai_compat_provider.py` 与 `provider/openai_compat_provider.py`。
+
+### 职责
+
+把「真实模型调用」收敛为一个薄传输层：读配置 → 建客户端 → 构造 SP/UP → 发起 Chat Completions → 解析 JSON → 交出**不可信候选**。它不做任何裁决。
+
+### 关键设计
+
+- **传输协议而非厂商**：`GENUI_MODEL_PROVIDER = mock | openai_compatible`，`openai_compatible` 指 OpenAI 兼容的 Chat Completions 协议。Qwen / 百炼、Kimi、DeepSeek、GLM 均由该协议接入，因此环境变量全部 provider-neutral（`GENUI_LLM_API_KEY` / `GENUI_LLM_BASE_URL` / `GENUI_GENERATION_MODEL` / `GENUI_REFINEMENT_MODEL`），不出现厂商前缀。
+- **单一配置读取点**：`llm/client.py` 是唯一读取模型环境变量的模块；Provider 只接收已构造好的 client，不接触凭证。无默认模型名——猜一个模型名比报错更难排查。
+- **条件式 fail fast**：`create_app()` 只校验**未被显式注入**的那一侧配置；两侧都注入时完全不读 LLM 环境变量（显式注入的 Provider 自带候选来源，此时要求凭证是伪依赖）。DI override 恒优先于环境变量。
+- **无重试**：`max_retries=0`、`timeout=30s`，不做自动重试、不做候选修复、不自动降级到 Mock。静默降级会让「真实模型接入」这个结论不可验证。
+- **SP/UP 物理分层**：见 §18。
+- **净化异常**：SDK 的网络/认证/限流异常一律转为固定文案的 `ProviderResponseError`，`from None` 切断 `__cause__`，避免 traceback 携带端点或凭证；日志只记 provider / kind / model / token 数。
+
 ## 4.2 前端模块 (Frontend Module) — M2 新增
 
 ### 模块位置
@@ -247,7 +267,8 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 - **Mock Provider 与真实模型使用相同接口**，通过环境变量切换；Mock 用确定性规则/预置响应，保证演示路径永远可跑。
 - Provider 只做"翻译"（自然语言 → 候选结构），不做"裁决"：输出一律视为不可信候选，必须走 §9 管线。
 - 模型不是系统状态的事实来源；它看不到也决定不了"什么是当前页面"，每轮所需的页面状态由系统注入。
-- Prompt 的 SP/UP 分层设计（哪些固定、哪些随轮次变化、缓存与成本影响）在设计文档与后续 Prompt Spec 中细化，属于关键协议，需正反向测试。
+- Prompt 的 SP/UP 分层设计（哪些固定、哪些随轮次变化、缓存与成本影响）见 §18，M4-02 已实现并有正反向测试。
+- **实现状态（M4-02）**：两侧均已提供真实实现（`generation/openai_compat_provider.py`、`provider/openai_compat_provider.py`），由 `GENUI_MODEL_PROVIDER` 在 `mock` 与 `openai_compatible` 间切换；显式注入（`create_app(...)` → `dependency_overrides`）优先于环境变量，测试因此无需凭证。
 
 ## 12. 模板推荐边界 (Template Recommendation Boundary)
 
@@ -277,7 +298,8 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 - 模型输出是不可信输入：永远不能绕过 §9 管线。
 - Patch 白名单制：只允许修改"选中节点 + Schema 允许属性"，其余一律拒绝（默认拒绝，而非默认允许）。
 - 无任意代码执行：系统任何位置不 `eval`、不注入 HTML 脚本、不把模型输出当代码。
-- 密钥走环境变量，仓库只提交脱敏示例；Mock/真实模型由环境切换。
+- 密钥走环境变量，仓库只提交脱敏示例（`.env.example` 仅含占位符，`.env` 已被忽略）；Mock/真实模型由环境切换。错误响应与日志均不含 Key / base_url / prompt / 模型原始输出 / traceback。
+- 默认测试运行零真实网络调用：`real_llm` 用例需 `GENUI_RUN_REAL_LLM=1` 显式 opt-in，且测试夹具会剥离宿主 shell 的模型环境变量。
 - 本地原型不做多用户隔离；这是已声明的非目标，不是遗漏。
 
 ## 16. 建议的仓库结构 (Suggested Repository Structure)
@@ -312,9 +334,36 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 | M3-01 | Refinement Pipeline + Mock Provider + Refine API | 后端局部精修管线、Mock Provider、POST /api/v1/dsl/refine、零变更校验 | ✅ 完成 |
 | M3-02 | 前后端局部精修闭环 | 前端 API Client、useReducer 原子提交、精修面板 UI、Vite dev proxy、Playwright E2E 两轮闭环 | ✅ 完成 |
 | M4-01 | 一句话生成网页初稿纵向切片 | Generation Provider 抽象、确定性 Mock 初稿模板、Generation Pipeline、POST /api/v1/dsl/generate、前端生成入口与生成→精修串联 E2E | ✅ 完成 |
-| M4 | 完成 PDF 任务一：一句话生成初稿、真实模型接入、SP/UP（系统提示词/用户提示词）策略、自然语言局部精修、多类 Patch、多轮上下文 | 真实 Provider、提示词策略、自然语言指令解析、多类 Patch 操作、多轮上下文 | 进行中（M4-01 已完成） |
+| M4-02 | 真实模型接入与 SP/UP 提示词策略 | llm/ 模块（配置与客户端工厂、集中式提示词）、两侧 OpenAICompat Provider、环境变量切换与条件式 fail fast、对抗性候选测试、opt-in 真实模型 smoke | ✅ 完成 |
+| M4 | 完成 PDF 任务一：一句话生成初稿、真实模型接入、SP/UP（系统提示词/用户提示词）策略、自然语言局部精修、多类 Patch、多轮上下文 | 真实 Provider、提示词策略、自然语言指令解析、多类 Patch 操作、多轮上下文 | 进行中（M4-01 / M4-02 已完成） |
 | M5 | 完成 PDF 任务二：模板推荐、自进化、指标、个性化、冷启动 | 模板库、沉淀/推荐/更新闭环、指标采集与展示、个性化与冷启动策略 | 待启动 |
 | M6 | 完整面试交付：覆盖矩阵、设计文档、架构图、Demo 脚本、追问题库、降级预案 | 需求覆盖矩阵、设计文档、架构图、Demo 脚本、追问题库、降级预案 | 待启动 |
+
+## 18. Prompt 策略与信任边界 (Prompt Strategy & Trust Boundary) — M4-02 新增
+
+### SP / UP 分层
+
+| 层 | 承载内容 | 实现性质 |
+|---|---|---|
+| System Prompt | 稳定契约：角色、DSL/Patch 版本、组件集与 props、结构与嵌套规则、ID 规则、style 白名单、输出格式、禁止项、抗改写声明 | **无参纯函数** → 逐字节稳定 |
+| User Prompt | 本轮不可信用户输入 + 受控动态上下文（精修侧恰 4 项：`instruction` / `selectedNodeId` / `nodeType` / `currentProps`） | 随轮次变化 |
+
+- 二者**物理分离**为 `system` / `user` 两个 message role，`messages` 恒为 2 条。用户输入没有任何进入 system role 的通道（SP 内不含格式化占位符）。
+- SP 逐字节稳定是 provider prompt caching 前缀命中的前提，也是「稳定前缀」这一成本结论的技术依据。
+- 精修侧 UP 遵循**最小权限**：只给选中节点的上下文，不给完整文档、兄弟/父节点或 metadata。模型看不到它不需要看的东西，越界候选因此更容易被生成得少、也更容易被检出。
+- **契约不迁就模型**：SP 只允许写校验器真正支持的规则。例如 Patch v0.1 的 `update_props` 仅浅合并 `node.props`，而 `style` 是与 `props` 平级的节点字段——所以精修 SP 明确声明 `style` 不可改，而不是教模型「把 style 塞进 props」（那样产出的候选 100% 会被拒）。
+
+### 信任边界
+
+```text
+模型侧 structured output（JSON Mode）  ──►  ≠ 信任边界
+本地确定性校验（validate_dsl_document / PatchDocument + 边界检查 + 完整性校验）  ──►  = 信任边界
+```
+
+- `response_format={"type": "json_object"}` 只保证「是合法 JSON」，不保证「符合 DSL/Patch Schema」。它降低无效往返，不承担安全职责。
+- 真实 Provider 与 Mock Provider 走**完全相同**的管线与校验器，真实模型不享有任何豁免；生成侧唯一校验入口仍是 `validate_dsl_document()`，精修侧仍完整执行结构校验 → target 边界检查 → 应用 → 非目标零变更验证。
+- Provider **不清洗候选**：schema 外字段、写错的 `targetNodeId` 一律原样上报。在 Provider 里「顺手修正」会掩盖提示词缺陷，让不合格的模型看起来合格。
+- 安全边界按**能力**定义而非字符：`Text.text = "<div>Hello</div>"` 是合法普通文本（DSL 不渲染 HTML、不执行内容），必须被接受；真正被拒的是能力越界——事件处理器字段、`javascript:` / `vbscript:` 的 Image `src`、未注册组件类型、schema 外字段、白名单外样式。用字符 grep 当安全断言既误伤正常内容，又给不出真实保护。
 
 ## 待决策项 (Open Decisions)
 
@@ -323,7 +372,7 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 | # | 待决策项 | 为什么暂不决定 | 最晚决定时点 | 决策人 |
 |---|----------|----------------|--------------|--------|
 | D1 | 前端状态管理库 | **已决策（M2）**：使用 React useState 管理 selectedNodeId，不引入外部状态库。理由：当前只有单一选中态，复杂度不足以证明引入第三方库 | — | 项目所有者 |
-| D2 | 真实模型供应商与具体型号 | Mock 优先策略下不影响 M1–M5；且涉及密钥与成本 | M6 开始前 | 项目所有者 |
+| D2 | 真实模型供应商与具体型号 | **传输层已决策（M4-02）**：统一走 OpenAI 兼容 Chat Completions 协议，环境变量 provider-neutral，因此换厂商只是改配置。**具体厂商与型号仍未定**：涉及密钥、成本与效果评测，首次 Demo 建议先用阿里云百炼（Qwen） | M6 开始前 | 项目所有者 |
 | D3 | 是否引入 SQLite | 本地 JSON 未暴露查询瓶颈；M5 模板库规模扩大后再评估 | M5 进行中评估，M6 前落定 | 项目所有者（依 Agent 建议） |
 | D4 | 双端契约类型的维护方式 | **已决策（M2）**：手写 TS 类型，JSON Schema 保持为契约事实来源。理由：组件数量有限，手写类型可读性优于自动生成，且可利用 discriminated union | — | 项目所有者 |
 | D5 | embedding 检索是否引入及其依赖 | 规则/关键词匹配可能已够用；引入新依赖需审批闸门 | M5 开始前 | 项目所有者 |

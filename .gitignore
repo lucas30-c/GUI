@@ -15,3 +15,7 @@ frontend/dist/
 # Playwright 产物
 frontend/test-results/
 frontend/playwright-report/
+
+# 本地环境变量与凭证（只提交 .env.example 占位符样例）
+.env
+.env.local

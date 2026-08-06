@@ -26,21 +26,35 @@ from genui_api.contracts.validation import (
 )
 from genui_api.generation.base import GenerationProvider
 from genui_api.generation.mock import MockGenerationProvider
+from genui_api.generation.openai_compat_provider import OpenAICompatGenerationProvider
 from genui_api.generation.pipeline import GenerationError, generate_document
+from genui_api.llm.client import PROVIDER_OPENAI_COMPATIBLE, load_model_config
 from genui_api.provider.base import RefinementProvider
 from genui_api.provider.mock import MockProvider
+from genui_api.provider.openai_compat_provider import OpenAICompatRefinementProvider
 from genui_api.refinement.pipeline import refine, RefinementError
 
 router = APIRouter()
 
 
 def get_provider() -> RefinementProvider:
-    """默认 Provider 工厂，返回无状态 MockProvider。"""
+    """精修 Provider 工厂：按 GENUI_MODEL_PROVIDER 选择 Mock 或真实 Provider（DD-5）。
+
+    mock / 未设置 → 无状态 MockProvider（不实例化 SDK、不读凭证、不发网络请求）。
+    显式注入的 Provider 由 create_app 通过 dependency_overrides 覆盖本工厂，
+    因此注入优先于环境变量。
+    """
+    config = load_model_config()
+    if config.provider == PROVIDER_OPENAI_COMPATIBLE:
+        return OpenAICompatRefinementProvider()
     return MockProvider()
 
 
 def get_generation_provider() -> GenerationProvider:
-    """默认 Generation Provider 工厂，返回无状态 MockGenerationProvider。"""
+    """生成 Provider 工厂：按 GENUI_MODEL_PROVIDER 选择 Mock 或真实 Provider（DD-5）。"""
+    config = load_model_config()
+    if config.provider == PROVIDER_OPENAI_COMPATIBLE:
+        return OpenAICompatGenerationProvider()
     return MockGenerationProvider()
 
 
