@@ -338,6 +338,30 @@ form[data-node-type="Form"] {
   color: #64748b;
 }
 
+/* --- 对话上下文（M4-03 多轮已确认轮次只读列表） --- */
+
+.refine-history-count {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.refine-history-list {
+  list-style: none;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.refine-history-list li {
+  margin-bottom: 4px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background-color: #f1f5f9;
+  font-size: 12px;
+  color: #334155;
+  word-break: break-all;
+}
+
 .refine-result {
   margin-bottom: 12px;
   padding: 10px;

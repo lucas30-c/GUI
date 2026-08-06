@@ -29,7 +29,7 @@ from genui_api.generation.mock import MockGenerationProvider
 from genui_api.generation.openai_compat_provider import OpenAICompatGenerationProvider
 from genui_api.generation.pipeline import GenerationError, generate_document
 from genui_api.llm.client import PROVIDER_OPENAI_COMPATIBLE, load_model_config
-from genui_api.provider.base import RefinementProvider
+from genui_api.provider.base import ConfirmedTurn, RefinementProvider
 from genui_api.provider.mock import MockProvider
 from genui_api.provider.openai_compat_provider import OpenAICompatRefinementProvider
 from genui_api.refinement.pipeline import refine, RefinementError
@@ -291,6 +291,17 @@ async def refine_dsl(
             ).model_dump(mode="json"),
         )
 
+    # wire → 域模型转换（Spec 009）：缺省 / null / [] 三态统一归一化为空 tuple。
+    history = tuple(
+        ConfirmedTurn(
+            instruction=t.instruction,
+            selected_node_id=t.selected_node_id,
+            selected_node_type=t.node_type,
+            patch_props=dict(t.patch_props),
+        )
+        for t in (req.history or ())
+    )
+
     # 调用 Pipeline
     try:
         result = await refine(
@@ -298,6 +309,7 @@ async def refine_dsl(
             selected_node_id=req.selected_node_id,
             instruction=req.instruction,
             provider=provider,
+            history=history,
         )
     except RefinementError as e:
         status_code = _ERROR_HTTP_MAP.get(e.code, 500)

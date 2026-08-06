@@ -81,3 +81,13 @@
 | **原子提交（REFINE_SUCCESS）** | 唯一写入 `currentDocument` / `lastPatch` / `lastIntegrity` / `lastSuccess` 的 action。全部检查通过后一次 dispatch 完成，不存在"文档已更新但结果面板未更新"的中间态。 |
 | **提交快照（Submit Snapshot）** | 发起请求时捕获的 `document` / `selectedNodeId` / `instruction`。响应校验与提交全程使用快照值，不使用响应到达时的当前 state。 |
 | **旧响应丢弃（Stale Response Discard）** | 请求进行中用户切换了选中节点时，返回的旧响应被丢弃：不触发原子提交、不覆盖当前选择与上一轮结果，仅结束 loading。判定依据是与选择交互同步写入的最新选中节点引用。 |
+
+## 多轮上下文
+
+| 术语 | 定义 |
+|------|------|
+| **Conversation Turn** | 一次精修交互的往返。只有服务端全部校验与前端提交层完整性检查都通过的轮次才有资格进入历史。 |
+| **Confirmed State（已确认状态）** | 一轮已确认精修的请求级摘要 `ConfirmedTurn`，恰含 `instruction` / `selectedNodeId` / `nodeType` / `patchProps` 四字段。不含模型输出原文、不含 role、不含 props 快照。失败轮与被丢弃的旧响应不产生已确认状态。 |
+| **Conversation History** | 前端持有的已确认轮次序列（oldest → newest），随请求以 `history` 字段发送。后端不存储任何会话；缺省 / `null` / `[]` 三态等价。 |
+| **History Reconstruction（历史重建）** | 发给模型的历史 `assistant` 消息由 `selectedNodeId + patchProps` 确定性重建为 Patch JSON，而不是回放模型原始输出。 |
+| **Context Budget（上下文预算）** | 多轮上下文的固定资源上界：轮数 `MAX_HISTORY_TURNS = 20`、序列化字符数 `MAX_HISTORY_CHARS = 50000`、单轮 `patchProps` 键数 `MAX_TURN_PROPS_KEYS = 16`。不做 token 会计、不引入 tokenizer。超限一律 422 `invalid_request_structure`。 |

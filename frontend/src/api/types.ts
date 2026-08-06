@@ -52,11 +52,27 @@ export interface VerifiedRefinementIntegrity {
   nonTargetNodesUnchanged: true;
 }
 
+/** history 中 patchProps 的值域：JSON 标量（DSL v0.1 全部 props 均为标量） */
+export type PatchPropValue = string | number | boolean | null;
+
+/**
+ * 一个**已确认**精修轮次的请求级摘要（Spec 009）。
+ * 无 role、无模型输出原文、无 props 快照——role 分配与 messages 组装由后端独占。
+ */
+export interface ConfirmedTurn {
+  instruction: string;
+  selectedNodeId: string;
+  nodeType: string;
+  patchProps: Record<string, PatchPropValue>;
+}
+
 /** 精修请求 */
 export interface RefineRequest {
   document: DslDocument;
   selectedNodeId: string;
   instruction: string;
+  /** 已确认对话历史（oldest → newest）；为空时请求体中省略该键（DD-10） */
+  history?: ConfirmedTurn[];
 }
 
 /** 精修成功响应 */

@@ -5,6 +5,7 @@
 import type { DslDocument } from '../dsl/types';
 import type {
   PatchDocument,
+  PatchOperation,
   RefineClientResult,
   RefineLocalError,
   RefineLocalErrorCode,
@@ -39,11 +40,28 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
 }
 
-/** C-2：patch 基本结构 — 对象 + version === "0.1" + operations 为数组 */
+/**
+ * 单条 operation 结构守卫：对象 + op === "update_props"
+ * + targetNodeId 为非空字符串 + props 为普通对象。
+ * 下游（`derivePatchProps` / Patch 列表展示）会结构化读取这三个字段，
+ * 因此逐条校验必须在本层完成，不能只检查 operations 是数组。
+ */
+function isPatchOperationShape(value: unknown): value is PatchOperation {
+  if (!isRecord(value)) return false;
+  if (value.op !== 'update_props') return false;
+  if (!isNonEmptyString(value.targetNodeId)) return false;
+  return isRecord(value.props);
+}
+
+/** C-2：patch 基本结构 — 对象 + version === "0.1" + operations 为数组且每一条结构合法 */
 export function isPatchDocumentShape(value: unknown): value is PatchDocument {
   if (!isRecord(value)) return false;
   if (value.version !== '0.1') return false;
-  return Array.isArray(value.operations);
+  if (!Array.isArray(value.operations)) return false;
+  for (const operation of value.operations) {
+    if (!isPatchOperationShape(operation)) return false;
+  }
+  return true;
 }
 
 /** C-3：document 基本结构 — 对象 + version 为字符串 + root 为对象且含字符串 id 与 type */
@@ -123,6 +141,10 @@ export async function refineNode(
         document: request.document,
         selectedNodeId: request.selectedNodeId,
         instruction: request.instruction,
+        // 空 history 省略该键 → 缺省 / null / [] 三态在后端归一化为同一结果（DD-10）
+        ...(request.history && request.history.length > 0
+          ? { history: request.history }
+          : {}),
       }),
     });
   } catch {

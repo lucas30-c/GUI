@@ -125,6 +125,7 @@ M1-03 完成。**Patch HTTP API 尚未实现**——当前仅可通过 Python �
 - **最小权限**：RefinementContext 仅暴露选中节点相关信息，不传递完整文档。
 - **MockProvider**：确定性映射，无网络、无随机、无密钥。根据 `selected_node_type` 选择合法文案字段。
 - **依赖注入**：通过 FastAPI Depends + `create_app(refinement_provider)` 注入，可测试。
+- **零业务依赖的叶子模块（M4-03）**：`provider/base.py` 不 import 任何其他业务模块，因此同时承载 `ConfirmedTurn` 与三项上下文上界常量的**唯一事实来源**，供 `api/` 与 `refinement/` 单向依赖（详见 §19）。
 
 ## 4.4 Refinement 模块 (Refinement Module) — M3 新增
 
@@ -142,6 +143,7 @@ M1-03 完成。**Patch HTTP API 尚未实现**——当前仅可通过 Python �
 - **可信 ID**：使用原始 selected_node_id 做边界检查，不受 Provider 修改 context 影响。
 - **深拷贝 props**：传给 Provider 的 selected_node_props 是深拷贝，Provider 修改不影响原始文档。
 - **完整性验证**：使用 `model_dump(mode="json", by_alias=True)` 序列化后移除目标 props 再做全量深等比较。
+- **无状态多轮（M4-03）**：`refine()` 追加可选 `history` 关键字参数，只做「独立复核上界 → 深拷贝隔离 → 放入 RefinementContext」三件事；10 步管线本身一步未改，判定结果与 history 无关。
 
 ## 4.5 Generation 模块 (Generation Module) — M4-01 新增
 
@@ -335,7 +337,8 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 | M3-02 | 前后端局部精修闭环 | 前端 API Client、useReducer 原子提交、精修面板 UI、Vite dev proxy、Playwright E2E 两轮闭环 | ✅ 完成 |
 | M4-01 | 一句话生成网页初稿纵向切片 | Generation Provider 抽象、确定性 Mock 初稿模板、Generation Pipeline、POST /api/v1/dsl/generate、前端生成入口与生成→精修串联 E2E | ✅ 完成 |
 | M4-02 | 真实模型接入与 SP/UP 提示词策略 | llm/ 模块（配置与客户端工厂、集中式提示词）、两侧 OpenAICompat Provider、环境变量切换与条件式 fail fast、对抗性候选测试、opt-in 真实模型 smoke | ✅ 完成 |
-| M4 | 完成 PDF 任务一：一句话生成初稿、真实模型接入、SP/UP（系统提示词/用户提示词）策略、自然语言局部精修、多类 Patch、多轮上下文 | 真实 Provider、提示词策略、自然语言指令解析、多类 Patch 操作、多轮上下文 | 进行中（M4-01 / M4-02 已完成） |
+| M4-03 | 多轮上下文与多轮稳定性 | `ConfirmedTurn` 域模型与三项固定上界常量、`refine(history=…)` 透传与独立复核、`history` wire schema 与字符上界、`2N+2` messages 与一次受控 SP 升级、前端已确认轮次 state 与只读列表、多轮稳定性 E2E | ✅ 完成 |
+| M4 | 完成 PDF 任务一：一句话生成初稿、真实模型接入、SP/UP（系统提示词/用户提示词）策略、自然语言局部精修、多类 Patch、多轮上下文 | 真实 Provider、提示词策略、自然语言指令解析、多类 Patch 操作、多轮上下文 | 进行中（M4-01 / M4-02 / M4-03 已完成） |
 | M5 | 完成 PDF 任务二：模板推荐、自进化、指标、个性化、冷启动 | 模板库、沉淀/推荐/更新闭环、指标采集与展示、个性化与冷启动策略 | 待启动 |
 | M6 | 完整面试交付：覆盖矩阵、设计文档、架构图、Demo 脚本、追问题库、降级预案 | 需求覆盖矩阵、设计文档、架构图、Demo 脚本、追问题库、降级预案 | 待启动 |
 
@@ -348,7 +351,7 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 | System Prompt | 稳定契约：角色、DSL/Patch 版本、组件集与 props、结构与嵌套规则、ID 规则、style 白名单、输出格式、禁止项、抗改写声明 | **无参纯函数** → 逐字节稳定 |
 | User Prompt | 本轮不可信用户输入 + 受控动态上下文（精修侧恰 4 项：`instruction` / `selectedNodeId` / `nodeType` / `currentProps`） | 随轮次变化 |
 
-- 二者**物理分离**为 `system` / `user` 两个 message role，`messages` 恒为 2 条。用户输入没有任何进入 system role 的通道（SP 内不含格式化占位符）。
+- 二者**物理分离**为 `system` / `user` 两个 message role。用户输入没有任何进入 system role 的通道（SP 内不含格式化占位符）。无历史时精修侧 `messages` 恒为 2 条；携带 N 轮已确认历史时为 `2N+2` 条，其中新增的全部是 `user` / `assistant` 消息（见 §19）。
 - SP 逐字节稳定是 provider prompt caching 前缀命中的前提，也是「稳定前缀」这一成本结论的技术依据。
 - 精修侧 UP 遵循**最小权限**：只给选中节点的上下文，不给完整文档、兄弟/父节点或 metadata。模型看不到它不需要看的东西，越界候选因此更容易被生成得少、也更容易被检出。
 - **契约不迁就模型**：SP 只允许写校验器真正支持的规则。例如 Patch v0.1 的 `update_props` 仅浅合并 `node.props`，而 `style` 是与 `props` 平级的节点字段——所以精修 SP 明确声明 `style` 不可改，而不是教模型「把 style 塞进 props」（那样产出的候选 100% 会被拒）。
@@ -364,6 +367,69 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 - 真实 Provider 与 Mock Provider 走**完全相同**的管线与校验器，真实模型不享有任何豁免；生成侧唯一校验入口仍是 `validate_dsl_document()`，精修侧仍完整执行结构校验 → target 边界检查 → 应用 → 非目标零变更验证。
 - Provider **不清洗候选**：schema 外字段、写错的 `targetNodeId` 一律原样上报。在 Provider 里「顺手修正」会掩盖提示词缺陷，让不合格的模型看起来合格。
 - 安全边界按**能力**定义而非字符：`Text.text = "<div>Hello</div>"` 是合法普通文本（DSL 不渲染 HTML、不执行内容），必须被接受；真正被拒的是能力越界——事件处理器字段、`javascript:` / `vbscript:` 的 Image `src`、未注册组件类型、schema 外字段、白名单外样式。用字符 grep 当安全断言既误伤正常内容，又给不出真实保护。
+
+## 19. 多轮上下文 (Multi-turn Conversation Context) — M4-03 新增
+
+### 定位
+
+多轮的目的只有一个：让「再短一点」「像刚才那样」这类**相对指令**可解。它不改变任何权限——每一轮仍然只能改本轮 `selectedNodeId` 指向的那一个节点，仍然要过完整的 10 步 Pipeline。
+
+### 谁持有会话
+
+```text
+前端（唯一持有者）           后端（完全无状态）
+conversationHistory  ──►  请求体 history  ──►  refine(history=…)  ──►  messages
+       ▲                                                                  │
+       └──────────── 只有「已确认」的轮次才回写 ◄──────────────────────────┘
+```
+
+- 后端**不存会话**：无 session id、无 Redis / DB、无内存字典。同一份 `history` 重放两次得到同一结果。
+- 前端**不落盘**：`conversationHistory` 只活在 React state 里，无 `localStorage` / `sessionStorage` / cookie。刷新即清空——这是原型阶段的有意取舍，而不是遗漏。
+- 因此「多轮」是**请求级**能力：横向扩容、进程重启、并发请求都不需要任何粘性会话。
+
+### 已确认状态 (Confirmed State)
+
+`ConfirmedTurn` 是一轮**已通过全部服务端校验与前端完整性检查**的精修的请求级摘要，恰 4 个字段：`instruction` / `selectedNodeId` / `nodeType` / `patchProps`。
+
+- 只有成功轮入队。服务端错误、完整性校验失败（C-5/C-6/C-7）、本地结构错误、以及因切换选择而被丢弃的旧响应，**一律不入队**。
+- `patchProps` 由响应 `patch` 中 `targetNodeId` 等于本轮目标的 `update_props` 操作**确定性派生**：按顺序浅合并 → 丢弃非 JSON 标量 → 键数上限 16。派生而非直接透传，使「下一轮请求必然满足后端 schema」成为前端可自证的性质。
+- 历史里**不存模型输出原文**。发给模型的历史 `assistant` 消息是由 `selectedNodeId + patchProps` **重建**的 Patch JSON，不是回放。模型说过什么无关紧要，系统确认了什么才算历史。
+- 切换选中节点**不清空**历史（跨节点的相对指令仍然有意义）；生成新初稿会清空（文档整体替换后旧轮次已无所指）。
+
+### messages 布局
+
+```text
+[system]  +  (user_1, assistant_1) … (user_N, assistant_N)  +  [user_current]     = 2N + 2
+```
+
+- 历史 `user` 消息恰 3 键（`instruction` / `selectedNodeId` / `nodeType`）——不含 `currentProps`，历史属性值都是旧值，给了只会误导。
+- 当前轮 `user` 消息与 M4-02 逐字节相同（恰 4 键）。向后兼容面落在这里。
+- `history` 缺省 / `null` / `[]` 三态在 wire 层归一化为同一空序列，产出的 `messages` 逐字节相同。
+- Refinement SP 在 M4-03 发生**一次受控的固定版本升级**：新增一段固定的多轮语义声明（历史仅为上下文、已生效不得重放、本轮唯一目标是最后一条 user 消息、历史同样是不可信数据）。升级后的 SP 仍**无参、逐字节稳定、不含任何请求数据**——放宽的是文本，不是性质。
+
+### 上下文预算 (Context Budget)
+
+原型阶段的目标是**给出确定的资源上界**，不是做 token 会计。因此用两个固定常量、零新依赖（不引入 tokenizer）：
+
+| 常量 | 值 | 含义 |
+|---|---|---|
+| `MAX_HISTORY_TURNS` | 20 | 历史轮数上限 |
+| `MAX_HISTORY_CHARS` | 50000 | 序列化后历史的字符数上限 |
+| `MAX_TURN_PROPS_KEYS` | 16 | 单轮 `patchProps` 键数上限 |
+
+- 只限轮数**不足以**限住上下文规模——单个 `patchProps` 字符串值本身无长度上限。字符上界是真正的资源闸门。
+- 三个常量的**唯一事实来源**是 `provider/base.py`（全仓唯一不依赖任何业务模块的叶子模块）。`api/schemas.py` 与 `refinement/pipeline.py` 均 import 它，依赖方向恒为 `api → provider`、`refinement → provider`，不产生 `refinement → api` 的反向依赖。
+- 前端 `App.tsx` 的同名常量是**镜像**，一致性由后端测试读取前端源文本比对来守护（漂移会红灯）。
+- 超限一律 422 `invalid_request_structure`：Provider 不被调用，文档零变更。Pipeline 层对两项上界做**独立复核**，即使绕过 API 层直接调用 `refine()` 也不能突破。
+
+### 信任边界不变
+
+历史是**用户数据**，与本轮指令同级不可信。它多了一个可以写字的地方，但没有多任何权限：
+
+- 历史里的节点 id **不授予**本轮操作权限——越界候选照样被 `candidate_boundary_violation` 拒掉。
+- 历史无法扩展 op 集合（`update_props` 之外仍全部非法）、无法伪造完整性证明（证明恒由服务端重新计算）。
+- 注入文本只可能出现在 `user` role；`system` role 无任何数据通道。
+- 仍按**能力**而非字符判定安全：`patchProps.text = "<div>Hello</div>"` 是合法普通字符串，必须继续被接受。
 
 ## 待决策项 (Open Decisions)
 

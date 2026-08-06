@@ -2,10 +2,20 @@
 
 from typing import Any, List, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from genui_api.contracts.dsl import DslDocument
 from genui_api.patch.models import PatchDocument
+
+# 上下文预算上界的单一事实来源是 provider/base.py（Spec 009 DD-21）。
+# 此处 import 并再导出，既保证 `from genui_api.api.schemas import MAX_HISTORY_TURNS`
+# 可用，也保证两处引用的是同一个对象（不是同值副本）。
+from genui_api.provider.base import (  # noqa: F401  (re-export)
+    MAX_HISTORY_CHARS,
+    MAX_HISTORY_TURNS,
+    MAX_TURN_PROPS_KEYS,
+    history_char_size,
+)
 
 
 class HealthResponse(BaseModel):
@@ -48,6 +58,38 @@ class DslValidationFailure(BaseModel):
 # --- Refine API Models ---
 
 
+# 9 种注册组件类型的只读镜像；contracts/** 仍是唯一契约事实来源，
+# 由测试断言本镜像与 DSL 节点联合类型集合完全一致（防漂移）。
+RegisteredNodeType = Literal[
+    "Page", "Section", "Heading", "Text", "Button", "Image", "Card", "Form", "Input"
+]
+
+# history 的 patchProps 值只能是 JSON 标量 —— DSL v0.1 全部 props 都是标量，
+# 因此该限制不损失任何合法表达，却关掉了「history 变成任意嵌套 payload 通道」。
+PatchPropValue = str | int | float | bool | None
+
+
+class RefineHistoryTurn(BaseModel):
+    """一个已确认精修轮次的请求级摘要（无 role、无模型输出原文、无 props 快照）。"""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        populate_by_name=True,
+    )
+
+    instruction: str = Field(min_length=1, max_length=1000)
+    selected_node_id: str = Field(
+        alias="selectedNodeId",
+        min_length=1,
+        max_length=128,
+    )
+    node_type: RegisteredNodeType = Field(alias="nodeType")
+    patch_props: dict[str, PatchPropValue] = Field(
+        alias="patchProps",
+        max_length=MAX_TURN_PROPS_KEYS,
+    )
+
+
 class RefineRequest(BaseModel):
     """POST /api/v1/dsl/refine 请求体。"""
 
@@ -62,6 +104,26 @@ class RefineRequest(BaseModel):
         min_length=1,
     )
     instruction: str
+    # 已确认对话历史（可选）：缺省 / null / [] 三态行为等价（Spec 009 DD-10）。
+    history: list[RefineHistoryTurn] | None = Field(
+        default=None,
+        max_length=MAX_HISTORY_TURNS,
+    )
+
+    @model_validator(mode="after")
+    def _check_history_char_size(self) -> "RefineRequest":
+        """序列化字符上界校验（Spec 009 DD-22）。
+
+        放在 model_validator 而非 route handler，使 schema 自身即为完整校验器；
+        逐 turn 结构校验通过后才统一判定整份 history 的体积。
+        """
+        if self.history:
+            payload = [turn.model_dump(by_alias=True) for turn in self.history]
+            if history_char_size(payload) > MAX_HISTORY_CHARS:
+                raise ValueError(
+                    f"history serialized size exceeds {MAX_HISTORY_CHARS} characters"
+                )
+        return self
 
 
 class RefinementIntegrity(BaseModel):

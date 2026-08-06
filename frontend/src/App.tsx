@@ -8,9 +8,11 @@ import { isDslDocumentShape, refineNode } from './api/refine';
 import type { Fetcher } from './api/refine';
 import { generateDraft } from './api/generate';
 import type {
+  ConfirmedTurn,
   GenerateLocalError,
   GenerateServerError,
   PatchDocument,
+  PatchPropValue,
   RefinementIntegrity,
   RefineLocalError,
   RefineServerError,
@@ -22,6 +24,13 @@ export const MAX_INSTRUCTION_LENGTH = 1000;
 
 /** prompt 前端长度上限，与后端 MAX_PROMPT_LENGTH 同值（DD-5@007） */
 export const MAX_PROMPT_LENGTH = 500;
+
+/** 已确认对话历史轮数上限；后端 provider/base.py 的 MAX_HISTORY_TURNS 是唯一事实来源，
+ *  本常量是其镜像，一致性由后端漂移测试守护（DD-21@009） */
+export const MAX_HISTORY_TURNS = 20;
+
+/** 单轮 patchProps 键数上限，与后端 MAX_TURN_PROPS_KEYS 同值（DD-13@009） */
+export const MAX_TURN_PROPS_KEYS = 16;
 
 /** 提交层完整性检查失败文案（前端自有固定文案，不含服务端原文或 document 内容） */
 export const INTEGRITY_ERROR_MESSAGES = {
@@ -58,6 +67,44 @@ function isVerifiedIntegrity(
   return integrity.nonTargetNodesUnchanged === true;
 }
 
+/** patchProps 值域守卫：只有 JSON 标量能进入 history（DD-17 的净化规则） */
+function isPatchPropValue(value: unknown): value is PatchPropValue {
+  return (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'boolean'
+  );
+}
+
+/**
+ * 由已通过完整性校验的响应 patch 确定性派生 `patchProps`（DD-17）：
+ * 只取 `targetNodeId` 等于本次提交节点的操作 → 按数组顺序浅合并 → 丢弃非标量值
+ * → 键数超过 16 时按插入顺序保留前 16 个。
+ *
+ * 净化使「下一轮请求必然满足后端 schema」成为前端可自证的性质。
+ */
+export function derivePatchProps(
+  patch: PatchDocument,
+  selectedNodeId: string,
+): Record<string, PatchPropValue> {
+  const merged: Record<string, PatchPropValue> = {};
+  for (const operation of patch.operations) {
+    if (operation.targetNodeId !== selectedNodeId) continue;
+    for (const [key, value] of Object.entries(operation.props)) {
+      if (!isPatchPropValue(value)) continue;
+      merged[key] = value;
+    }
+  }
+  const entries = Object.entries(merged);
+  if (entries.length <= MAX_TURN_PROPS_KEYS) return merged;
+  const capped: Record<string, PatchPropValue> = {};
+  for (const [key, value] of entries.slice(0, MAX_TURN_PROPS_KEYS)) {
+    capped[key] = value;
+  }
+  return capped;
+}
+
 interface RefinementState {
   currentDocument: DslDocument;
   selectedNodeId: string | null;
@@ -67,6 +114,8 @@ interface RefinementState {
   loading: boolean;
   error: RefineServerError | RefineLocalError | null;
   instruction: string;
+  /** 已确认对话历史（oldest → newest）；**不是**状态事实来源（CS-1@009） */
+  conversationHistory: ConfirmedTurn[];
   // --- 生成侧状态（与精修侧 loading / error 分离，DD-17） ---
   prompt: string;
   generateLoading: boolean;
@@ -83,6 +132,7 @@ type RefinementAction =
       patch: PatchDocument;
       integrity: VerifiedRefinementIntegrity;
       selectedNodeId: string;
+      turn: ConfirmedTurn;
     }
   | { type: 'REFINE_FAILURE'; error: RefineServerError | RefineLocalError }
   | { type: 'REFINE_END' }
@@ -101,6 +151,7 @@ const initialState: RefinementState = {
   loading: false,
   error: null,
   instruction: '',
+  conversationHistory: [],
   prompt: '',
   generateLoading: false,
   generateError: null,
@@ -121,6 +172,7 @@ function refinementReducer(
       return { ...state, loading: true, error: null };
 
     // 唯一的成功提交入口：单次 dispatch 原子完成全部成功字段更新
+    // history 入队与文档替换在同一次 dispatch 中完成 → 不存在两者不一致的中间态（CS-3@009）
     case 'REFINE_SUCCESS':
       return {
         ...state,
@@ -131,6 +183,9 @@ function refinementReducer(
         lastSuccess: { selectedNodeId: action.selectedNodeId },
         instruction: '',
         error: null,
+        conversationHistory: [...state.conversationHistory, action.turn].slice(
+          -MAX_HISTORY_TURNS,
+        ),
       };
 
     // 结构上无法写入任何成功字段
@@ -147,6 +202,7 @@ function refinementReducer(
       return { ...state, generateLoading: true, generateError: null };
 
     // 唯一的初稿提交入口：单次 dispatch 原子设置 9 项（DD-18）
+    // 新文档意味着新对话：历史轮次全部指向旧文档的节点，必须清空（DD-6@009）
     case 'GENERATE_SUCCESS': {
       const generatedDocument = action.document;
       return {
@@ -160,6 +216,7 @@ function refinementReducer(
         instruction: '',
         prompt: '',
         generateError: null,
+        conversationHistory: [],
       };
     }
 
@@ -219,16 +276,21 @@ function App({ fetcher }: AppProps) {
     // 跨链路同步互斥：生成在途时禁止精修提交（DD-20）
     if (generateInFlightRef.current) return;
 
-    // 步骤 1：捕获快照
+    // 步骤 1：捕获快照（history 与 nodeType 与其余字段在同一快照中捕获）
     const snapshot = {
       document: state.currentDocument,
       selectedNodeId: state.selectedNodeId,
       instruction: state.instruction,
+      history: state.conversationHistory.slice(-MAX_HISTORY_TURNS),
     };
     if (snapshot.selectedNodeId === null) return;
     if (snapshot.instruction.trim().length === 0) return;
     if (snapshot.instruction.length > MAX_INSTRUCTION_LENGTH) return;
     const snapshotSelectedNodeId = snapshot.selectedNodeId;
+    // nodeType 取**快照文档**而非响应（延续「响应一律不可信」口径）；解析不到则不发请求（DD-17@009）
+    const snapshotNode = findNodeById(snapshot.document.root, snapshotSelectedNodeId);
+    if (snapshotNode === null) return;
+    const snapshotNodeType = snapshotNode.type;
 
     // 步骤 2：REFINE_START
     inFlightRef.current = true;
@@ -241,6 +303,7 @@ function App({ fetcher }: AppProps) {
           document: snapshot.document,
           selectedNodeId: snapshotSelectedNodeId,
           instruction: snapshot.instruction,
+          history: snapshot.history,
         },
         fetcher,
       );
@@ -285,13 +348,20 @@ function App({ fetcher }: AppProps) {
       // 提交前最终竞态确认
       if (snapshotSelectedNodeId !== latestSelectedNodeIdRef.current) return;
 
-      // 步骤 9：唯一成功提交入口
+      // 步骤 9：由快照 + 已校验响应 patch 确定性派生 turn，随成功提交一次 dispatch
+      const turn: ConfirmedTurn = {
+        instruction: snapshot.instruction,
+        selectedNodeId: snapshotSelectedNodeId,
+        nodeType: snapshotNodeType,
+        patchProps: derivePatchProps(result.patch, snapshotSelectedNodeId),
+      };
       dispatch({
         type: 'REFINE_SUCCESS',
         document: result.document,
         patch: result.patch,
         integrity,
         selectedNodeId: snapshotSelectedNodeId,
+        turn,
       });
     } finally {
       // 步骤 10
@@ -482,6 +552,29 @@ function App({ fetcher }: AppProps) {
                 精修中...
               </p>
             ) : null}
+          </section>
+
+          <section className="refine-section">
+            <h2>对话上下文</h2>
+            <p className="refine-history-count" data-testid="refine-history-count">
+              已确认轮次：{state.conversationHistory.length} / {MAX_HISTORY_TURNS}
+            </p>
+            {state.conversationHistory.length === 0 ? (
+              <p className="panel-hint" data-testid="refine-history-empty">
+                尚无已确认轮次
+              </p>
+            ) : (
+              <ol className="refine-history-list" data-testid="refine-history-list">
+                {state.conversationHistory.map((turn, index) => (
+                  <li
+                    key={`${turn.selectedNodeId}-${index}`}
+                    data-testid="refine-history-item"
+                  >
+                    {index + 1} · {turn.selectedNodeId} · {turn.instruction}
+                  </li>
+                ))}
+              </ol>
+            )}
           </section>
 
           <section className="refine-section">

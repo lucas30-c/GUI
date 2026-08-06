@@ -3,13 +3,20 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Sequence
 
 from genui_api.contracts.validation import validate_dsl_document, DslValidationError
 from genui_api.contracts.dsl import DslDocument, DslNode
 from genui_api.patch.apply import apply_patch, PatchError
 from genui_api.patch.models import PatchDocument
-from genui_api.provider.base import RefinementProvider, RefinementContext
+from genui_api.provider.base import (
+    MAX_HISTORY_CHARS,
+    MAX_HISTORY_TURNS,
+    ConfirmedTurn,
+    RefinementContext,
+    RefinementProvider,
+    history_char_size,
+)
 
 
 @dataclass
@@ -109,10 +116,14 @@ async def refine(
     selected_node_id: str,
     instruction: str,
     provider: RefinementProvider,
+    history: Sequence[ConfirmedTurn] = (),
 ) -> RefinementResult:
     """
     Refinement Pipeline 核心。无状态、不修改输入的异步编排函数。
     失败时抛出 RefinementError。
+
+    `history` 是已确认对话历史（oldest → newest），**只作为模型输入的上下文**：
+    它不参与本函数的任何判定（Spec 009 DD-9），也不授予任何 target 权限。
     """
     # 步骤 1: 校验 instruction
     if not instruction or not instruction.strip():
@@ -172,7 +183,39 @@ async def refine(
             ],
         )
 
-    # 步骤 4: 构造 RefinementContext（深拷贝 props）
+    # 步骤 4: 构造 RefinementContext（深拷贝 props 与 history）
+    #
+    # 先做两项上界的防御性复核（Spec 009 DD-16 / DD-22）：refine() 是可被测试与
+    # 其他入口直接调用的公开函数，安全性不应依赖调用方是否走过 API schema。
+    # 两项检查都在 Provider 调用之前，因此超限请求永不触达模型。
+    trusted_history = tuple(history)
+    if len(trusted_history) > MAX_HISTORY_TURNS:
+        raise RefinementError(
+            code="invalid_request_structure",
+            message=f"History exceeds {MAX_HISTORY_TURNS} turn limit",
+            issues=[
+                RefinementIssue(
+                    path="history",
+                    code="invalid_request_structure",
+                    message=f"Exceeds {MAX_HISTORY_TURNS} turns",
+                )
+            ],
+        )
+    if trusted_history and history_char_size(
+        [turn.as_wire_dict() for turn in trusted_history]
+    ) > MAX_HISTORY_CHARS:
+        raise RefinementError(
+            code="invalid_request_structure",
+            message=f"History exceeds {MAX_HISTORY_CHARS} character limit",
+            issues=[
+                RefinementIssue(
+                    path="history",
+                    code="invalid_request_structure",
+                    message=f"Serialized size exceeds {MAX_HISTORY_CHARS} characters",
+                )
+            ],
+        )
+
     target_props = (
         target_node.props.model_dump(mode="json", by_alias=True)
         if target_node.props
@@ -184,6 +227,17 @@ async def refine(
         selected_node_type=target_node.type,
         selected_node_props=copy.deepcopy(target_props),
         document_version=validated_doc.version,
+        # 深拷贝 patch_props：ConfirmedTurn 本身 frozen，但其 dict 值可变；
+        # Provider 对上下文的任何写入尝试都不得影响调用方持有的对象。
+        conversation_history=tuple(
+            ConfirmedTurn(
+                instruction=turn.instruction,
+                selected_node_id=turn.selected_node_id,
+                selected_node_type=turn.selected_node_type,
+                patch_props=copy.deepcopy(turn.patch_props),
+            )
+            for turn in trusted_history
+        ),
     )
 
     # 步骤 5: 调用 Provider
