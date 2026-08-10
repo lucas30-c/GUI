@@ -501,8 +501,14 @@ class TestVerifyNonTargetUnchanged:
 
         assert verify_non_target_unchanged(original, modified, "heading-1") is True
 
-    def test_target_style_change_detected(self):
-        """AC-73: 能发现目标节点 style 变化"""
+    def test_target_style_change_allowed(self):
+        """AC-73（Spec 010 DD-20 重定向）：目标节点 style 变化是允许的
+
+        M4-04 让 `update_style` 成为合法操作，因此步骤 9 的剥离范围扩为
+        `{props, style}`——但**仅对目标节点**。原断言「目标 style 变化 → False」
+        被重定向为 True，同时下方 `test_non_target_style_change_detected`
+        补上对偶的负向断言，保证测试强度不下降（AP-6）。
+        """
         doc_dict = _minimal_doc()
         original = validate_dsl_document(doc_dict)
 
@@ -510,6 +516,21 @@ class TestVerifyNonTargetUnchanged:
         modified_dict["root"]["children"][0]["style"] = {"color": "#000"}
         modified = validate_dsl_document(modified_dict)
 
+        assert verify_non_target_unchanged(original, modified, "heading-1") is True
+
+    def test_non_target_style_change_detected(self):
+        """对偶断言：非目标节点的 style 变化仍必须被检出"""
+        doc_dict = _minimal_doc()
+        doc_dict["root"]["children"].append(
+            {"id": "text-1", "type": "Text", "props": {"text": "Original"}}
+        )
+        original = validate_dsl_document(doc_dict)
+
+        modified_dict = copy.deepcopy(doc_dict)
+        modified_dict["root"]["children"][1]["style"] = {"color": "#000"}
+        modified = validate_dsl_document(modified_dict)
+
+        # heading-1 是目标，text-1 的 style 变了必须检测到
         assert verify_non_target_unchanged(original, modified, "heading-1") is False
 
     def test_target_children_change_detected(self):

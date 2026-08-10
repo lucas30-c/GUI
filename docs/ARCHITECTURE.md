@@ -82,22 +82,24 @@ API 层只作为底层校验层（`contracts/` 模块）的 HTTP 适配器：接
 
 ### 职责
 
-Patch 核心负责将结构化 Patch 应用于 DSL 文档。当前仅支持 `update_props` 操作类型。
+Patch 核心负责将结构化 Patch 应用于 DSL 文档。当前支持两种操作类型：`update_props`（浅合并到 `node.props`）与 `update_style`（浅合并到 `node.style`，M4-04 新增）。两者是同一个 discriminated union（判别键 `op`）的成员，可出现在同一份 Patch 的 `operations` 数组中。
 
 ### 关键设计
 
 - **深拷贝**：对源文档执行 `copy.deepcopy()`，保护原始对象不可变。
 - **顺序执行**：多个操作按 operations 数组顺序依次执行。
 - **原子性**：所有操作成功且后校验通过才返回结果；任一步骤失败则整体失败，不产生部分修改。
+- **浅合并**：两类操作都只覆盖候选中出现的键，未出现的键保留原值；`update_style` 另有删除语义——显式 `null` 表示移除该键（回退到「未设置」），而不是写入 `null`；合并后 `style` 为空则整个 `style` 键被移除（归一化）。
+- **样式白名单是硬闸门**：`style` 的合法键恰为 DSL Style 的 11 个白名单字段（`color` / `backgroundColor` / `fontSize` / `fontWeight` / `textAlign` / `width` / `height` / `padding` / `margin` / `borderRadius` / `gap`），值域由同一份 Pydantic 模型（`extra="forbid"`）裁决，Patch 侧不复制正则。
 - **后校验**：Patch 应用后对整个 Patched Document 调用 `contracts.validation.validate_dsl_document()` 执行完整 DSL 校验。
 
 ### 依赖
 
-Patch 模块依赖 `genui_api.contracts.validation.validate_dsl_document()` 进行源文档校验和后校验。
+Patch 模块依赖 `genui_api.contracts.validation.validate_dsl_document()` 进行源文档校验和后校验；`style` 的字段集与值域直接复用 `contracts.dsl.Style`。
 
 ### 当前状态
 
-M1-03 完成。**Patch HTTP API 尚未实现**——当前仅可通过 Python 函数 `apply_patch(document, patch)` 调用。
+M4-04 完成。`update_props` 与 `update_style` 两类操作均已闭环，并由 `POST /api/v1/dsl/refine` 在服务端产出与应用；`apply_patch(document, patch)` 是同一确定性引擎的 Python 入口。
 
 ### 错误分类
 
@@ -123,9 +125,10 @@ M1-03 完成。**Patch HTTP API 尚未实现**——当前仅可通过 Python �
 
 - **Protocol 定义**：使用 `typing.Protocol`，任何具有匹配签名的类自动满足接口。
 - **最小权限**：RefinementContext 仅暴露选中节点相关信息，不传递完整文档。
-- **MockProvider**：确定性映射，无网络、无随机、无密钥。根据 `selected_node_type` 选择合法文案字段。
+- **MockProvider**：确定性映射，无网络、无随机、无密钥。根据 `selected_node_type` 选择合法文案字段；另识别 `set_style:` / `set_text_style:` 前缀以产出 `update_style` 与混合候选（M4-04）。
 - **依赖注入**：通过 FastAPI Depends + `create_app(refinement_provider)` 注入，可测试。
-- **零业务依赖的叶子模块（M4-03）**：`provider/base.py` 不 import 任何其他业务模块，因此同时承载 `ConfirmedTurn` 与三项上下文上界常量的**唯一事实来源**，供 `api/` 与 `refinement/` 单向依赖（详见 §19）。
+- **零业务依赖的叶子模块（M4-03）**：`provider/base.py` 不 import 任何其他业务模块，因此同时承载 `ConfirmedTurn` 与四项上下文上界常量的**唯一事实来源**，供 `api/` 与 `refinement/` 单向依赖（详见 §19）。
+- **style 上下文（M4-04）**：`RefinementContext` 增加 `selected_node_style`，由 Pipeline 从**已校验文档**派生（`exclude_none`），不来自模型输出、不来自 history 回灌；`ConfirmedTurn` 增加 `patch_style`（详见 §19）。
 
 ## 4.4 Refinement 模块 (Refinement Module) — M3 新增
 
@@ -141,8 +144,9 @@ M1-03 完成。**Patch HTTP API 尚未实现**——当前仅可通过 Python �
 
 - **不可变输入**：不修改传入的 document 和 instruction。
 - **可信 ID**：使用原始 selected_node_id 做边界检查，不受 Provider 修改 context 影响。
-- **深拷贝 props**：传给 Provider 的 selected_node_props 是深拷贝，Provider 修改不影响原始文档。
-- **完整性验证**：使用 `model_dump(mode="json", by_alias=True)` 序列化后移除目标 props 再做全量深等比较。
+- **深拷贝 props/style**：传给 Provider 的 `selected_node_props` 与 `selected_node_style` 都是深拷贝，Provider 修改不影响原始文档。
+- **完整性验证**：使用 `model_dump(mode="json", by_alias=True)` 序列化后移除**目标节点**的 `props` 与 `style` 再做全量深等比较；剥离范围严格限于目标节点，任何其他节点的 props/style 变化仍会被检出（M4-04 起 style 与 props 同为目标节点上的合法可变字段）。
+- **style 唯一事实来源（M4-04）**：`selected_node_style` 由 Pipeline 从**已校验源文档**的目标节点派生（`exclude_none=True`，因此只含已生效字段）。模型上一轮说过什么、history 里带了什么 `patchStyle`，都不参与派生——这是「再大一点」这类相对指令可解且不漂移的技术前提。
 - **无状态多轮（M4-03）**：`refine()` 追加可选 `history` 关键字参数，只做「独立复核上界 → 深拷贝隔离 → 放入 RefinementContext」三件事；10 步管线本身一步未改，判定结果与 history 无关。
 
 ## 4.5 Generation 模块 (Generation Module) — M4-01 新增
@@ -200,11 +204,11 @@ React + TypeScript + Vite
 - **递归 DslRenderer**：单一 React 组件根据节点 `type` 递归渲染整棵 DSL 树为语义 HTML。
 - **Style 白名单映射器**：纯函数，将 DSL Style 对象转为 React CSSProperties，仅允许 11 个白名单字段。
 - **selectedNodeId 存储于 React state**（D1 决策：useState，不引入外部状态库），永远不写入 DSL。
-- **Gold Case 静态加载**：当前直接导入 `examples/dsl/coffee-shop-landing.json`，无后端请求。
+- **文档来源**：初始可加载 `examples/dsl/coffee-shop-landing.json` 作为 Gold Case，也可由 `POST /api/v1/dsl/generate` 生成初稿；精修结果由 `POST /api/v1/dsl/refine` 返回后**整文档原子替换**。前端永不本地拼装或修改 DSL，也永不应用 `response.patch`（Patch 仅用于结果展示）。
 
 ### 当前状态
 
-M2 完成。**尚未实现**：后端集成、Patch API 调用、模型接入、对话功能。
+M4-04 完成。已实现：后端集成（生成 + 精修）、模型接入（Mock / 真实模型由环境变量切换）、多轮对话上下文（含 `patchStyle`）、`update_props` 与 `update_style` 两类受控操作的结果展示。**尚未实现**：模板推荐、指标面板、Undo/Redo（属 PDF 任务二及之后）。
 
 ## 5. 共享契约 (Shared Contracts)
 
@@ -213,7 +217,7 @@ M2 完成。**尚未实现**：后端集成、Patch API 调用、模型接入、
 1. **DSL Document Schema**：节点结构、组件类型枚举、各组件允许的 props。
 2. **Patch Schema**：操作类型、目标引用方式（仅允许稳定 ID）、允许修改的属性路径。
 3. **API 契约**：生成初稿、局部精修、模板推荐、指标查询等端点的请求/响应形状。
-4. **选中控件上下文契约**：`selectedNodeId` + 该节点的语义摘要（类型、当前 props、在页面结构中的路径），供模型理解"用户选中了谁"。
+4. **选中控件上下文契约**：`selectedNodeId` + 该节点的语义摘要（类型、当前 props、当前 style、在页面结构中的路径），供模型理解"用户选中了谁"。
 
 契约变更属于审批闸门（见 AGENTS.md §6），必须经项目所有者批准并记录 ADR。
 
@@ -248,7 +252,7 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
    - Patch 不创建/删除/修改任何节点 ID；
    - 目标节点在当前文档中存在；
    - 目标节点 == 当前 `selectedNodeId`（或其内部受允许属性，以 Spec 为准）；
-   - 组件类型已注册；修改的 prop 在该组件的可编辑清单内；新值类型/取值合法。
+   - 组件类型已注册；修改的 prop 在该组件的可编辑清单内；修改的 style 字段在 11 项白名单内；新值类型/取值合法。
 3. **Patch 边界校验**：Patch 不引用目标之外的任何节点；不引入脚本、事件处理、任意 HTML。
 4. **应用到副本**：应用到文档副本，得到候选新文档。
 5. **完整性校验**：见 §10。
@@ -292,13 +296,14 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 - **后端 pytest**：DSL Schema 校验、Patch 管线（正向/反向）、非目标完整性校验、Provider 边界（Mock）、模板机制（沉淀/推荐/更新）、API 端点。
 - **前端单元测试**：DSL 渲染、选中交互、Patch 后局部更新（不重绘整页）。
 - **Gold Case**：固定输入 → 固定期望输出的端到端用例集（如咖啡店演示流），作为防漂移回归。
-- **后期 Playwright**：演示闭环的浏览器级回归。
+- **Playwright E2E**：演示闭环的浏览器级回归。已覆盖生成闭环、精修闭环、多轮稳定性、style 精修（`update_style` 与混合候选）与 Golden Path（生成 → 选中 → 文案 → 颜色 → 尺寸 → 非目标零变更），统一走 MockProvider 以保证 CI 确定性。
+- **opt-in 真实模型 smoke**：单轮、多轮 props、多轮 style 三条 `real_llm` 用例，需 `GENUI_RUN_REAL_LLM=1` 且凭证齐备；缺凭证恒为 `skipped`，不得记为通过。
 - 所有关键协议必须有正向 + 反向测试（AGENTS.md 约束 19）。
 
 ## 15. 安全边界 (Security Boundaries)
 
 - 模型输出是不可信输入：永远不能绕过 §9 管线。
-- Patch 白名单制：只允许修改"选中节点 + Schema 允许属性"，其余一律拒绝（默认拒绝，而非默认允许）。
+- Patch 白名单制：只允许修改「选中节点 + Schema 允许属性 + 11 项 style 白名单字段」，其余一律拒绝（默认拒绝，而非默认允许）。
 - 无任意代码执行：系统任何位置不 `eval`、不注入 HTML 脚本、不把模型输出当代码。
 - 密钥走环境变量，仓库只提交脱敏示例（`.env.example` 仅含占位符，`.env` 已被忽略）；Mock/真实模型由环境切换。错误响应与日志均不含 Key / base_url / prompt / 模型原始输出 / traceback。
 - 默认测试运行零真实网络调用：`real_llm` 用例需 `GENUI_RUN_REAL_LLM=1` 显式 opt-in，且测试夹具会剥离宿主 shell 的模型环境变量。
@@ -338,7 +343,8 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 | M4-01 | 一句话生成网页初稿纵向切片 | Generation Provider 抽象、确定性 Mock 初稿模板、Generation Pipeline、POST /api/v1/dsl/generate、前端生成入口与生成→精修串联 E2E | ✅ 完成 |
 | M4-02 | 真实模型接入与 SP/UP 提示词策略 | llm/ 模块（配置与客户端工厂、集中式提示词）、两侧 OpenAICompat Provider、环境变量切换与条件式 fail fast、对抗性候选测试、opt-in 真实模型 smoke | ✅ 完成 |
 | M4-03 | 多轮上下文与多轮稳定性 | `ConfirmedTurn` 域模型与三项固定上界常量、`refine(history=…)` 透传与独立复核、`history` wire schema 与字符上界、`2N+2` messages 与一次受控 SP 升级、前端已确认轮次 state 与只读列表、多轮稳定性 E2E | ✅ 完成 |
-| M4 | 完成 PDF 任务一：一句话生成初稿、真实模型接入、SP/UP（系统提示词/用户提示词）策略、自然语言局部精修、多类 Patch、多轮上下文 | 真实 Provider、提示词策略、自然语言指令解析、多类 Patch 操作、多轮上下文 | 进行中（M4-01 / M4-02 / M4-03 已完成） |
+| M4-04 | 受控样式精修（`update_style`）与 PDF 任务一收口 | Patch v0.1 判别联合新增 `update_style`（11 项 style 白名单 + null 删除 + 空 style 归一化）、`RefinementContext.selected_node_style` 由已校验文档派生、`ConfirmedTurn.patch_style`、精修 SP 升级与 UP 扩为 5 键、完整性剥离范围扩为 `{props, style}`、前端 style 派生与展示、style 精修 E2E + Golden Path E2E、opt-in 真实模型多轮 style smoke、对外文档对齐 | ✅ 完成 |
+| M4 | 完成 PDF 任务一：一句话生成初稿、真实模型接入、SP/UP（系统提示词/用户提示词）策略、自然语言局部精修、多类 Patch、多轮上下文 | 真实 Provider、提示词策略、自然语言指令解析、多类 Patch 操作、多轮上下文 | ✅ 完成（M4-01 / M4-02 / M4-03 / M4-04） |
 | M5 | 完成 PDF 任务二：模板推荐、自进化、指标、个性化、冷启动 | 模板库、沉淀/推荐/更新闭环、指标采集与展示、个性化与冷启动策略 | 待启动 |
 | M6 | 完整面试交付：覆盖矩阵、设计文档、架构图、Demo 脚本、追问题库、降级预案 | 需求覆盖矩阵、设计文档、架构图、Demo 脚本、追问题库、降级预案 | 待启动 |
 
@@ -349,12 +355,13 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 | 层 | 承载内容 | 实现性质 |
 |---|---|---|
 | System Prompt | 稳定契约：角色、DSL/Patch 版本、组件集与 props、结构与嵌套规则、ID 规则、style 白名单、输出格式、禁止项、抗改写声明 | **无参纯函数** → 逐字节稳定 |
-| User Prompt | 本轮不可信用户输入 + 受控动态上下文（精修侧恰 4 项：`instruction` / `selectedNodeId` / `nodeType` / `currentProps`） | 随轮次变化 |
+| User Prompt | 本轮不可信用户输入 + 受控动态上下文（精修侧恰 5 项：`instruction` / `selectedNodeId` / `nodeType` / `currentProps` / `currentStyle`） | 随轮次变化 |
 
 - 二者**物理分离**为 `system` / `user` 两个 message role。用户输入没有任何进入 system role 的通道（SP 内不含格式化占位符）。无历史时精修侧 `messages` 恒为 2 条；携带 N 轮已确认历史时为 `2N+2` 条，其中新增的全部是 `user` / `assistant` 消息（见 §19）。
 - SP 逐字节稳定是 provider prompt caching 前缀命中的前提，也是「稳定前缀」这一成本结论的技术依据。
-- 精修侧 UP 遵循**最小权限**：只给选中节点的上下文，不给完整文档、兄弟/父节点或 metadata。模型看不到它不需要看的东西，越界候选因此更容易被生成得少、也更容易被检出。
-- **契约不迁就模型**：SP 只允许写校验器真正支持的规则。例如 Patch v0.1 的 `update_props` 仅浅合并 `node.props`，而 `style` 是与 `props` 平级的节点字段——所以精修 SP 明确声明 `style` 不可改，而不是教模型「把 style 塞进 props」（那样产出的候选 100% 会被拒）。
+- 精修侧 UP 遵循**最小权限**：只给选中节点的上下文（props + style），不给完整文档、兄弟/父节点或 metadata。模型看不到它不需要看的东西，越界候选因此更容易被生成得少、也更容易被检出。
+- **契约不迁就模型**：SP 只允许写校验器真正支持的规则。M4-02 时 Patch v0.1 只有 `update_props`（浅合并 `node.props`），而 `style` 是与 `props` 平级的节点字段——所以当时的精修 SP 明确声明 `style` 不可改，而不是教模型「把 style 塞进 props」（那样产出的候选 100% 会被拒）。M4-04 引入 `update_style` 后，SP 随之做了一次**受控升级**：声明两类 op、给出 11 项 style 白名单与各字段值域、并要求「改样式必须用 `update_style`、改属性必须用 `update_props`」——放宽的仍是校验器已经支持的部分。
+- **相对指令的上下文依据（M4-04）**：UP 的 `currentStyle` 只列出**已生效**字段（`exclude_none`），其唯一来源是已校验 Document。「再大一点」「深一点」由模型基于 `currentStyle` 现值换算；`currentStyle` 缺该字段时按节点类型推断一个白名单内的值。历史消息里的样式值一律视为旧值。
 
 ### 信任边界
 
@@ -389,11 +396,13 @@ conversationHistory  ──►  请求体 history  ──►  refine(history=…
 
 ### 已确认状态 (Confirmed State)
 
-`ConfirmedTurn` 是一轮**已通过全部服务端校验与前端完整性检查**的精修的请求级摘要，恰 4 个字段：`instruction` / `selectedNodeId` / `nodeType` / `patchProps`。
+`ConfirmedTurn` 是一轮**已通过全部服务端校验与前端完整性检查**的精修的请求级摘要，恰 5 个字段：`instruction` / `selectedNodeId` / `nodeType` / `patchProps` / `patchStyle`（后者 M4-04 新增）。
 
 - 只有成功轮入队。服务端错误、完整性校验失败（C-5/C-6/C-7）、本地结构错误、以及因切换选择而被丢弃的旧响应，**一律不入队**。
-- `patchProps` 由响应 `patch` 中 `targetNodeId` 等于本轮目标的 `update_props` 操作**确定性派生**：按顺序浅合并 → 丢弃非 JSON 标量 → 键数上限 16。派生而非直接透传，使「下一轮请求必然满足后端 schema」成为前端可自证的性质。
-- 历史里**不存模型输出原文**。发给模型的历史 `assistant` 消息是由 `selectedNodeId + patchProps` **重建**的 Patch JSON，不是回放。模型说过什么无关紧要，系统确认了什么才算历史。
+- `patchProps` 由响应 `patch` 中 `targetNodeId` 等于本轮目标的 `update_props` 操作**确定性派生**：按顺序浅合并 → 丢弃非 JSON 标量 → 键数上限 16。`patchStyle` 同理由 `update_style` 操作派生，键数上限 11（等于 style 白名单字段数）。派生而非直接透传，使「下一轮请求必然满足后端 schema」成为前端可自证的性质。
+- `patchStyle` 无键时该键**整体省略**，因此纯 props 轮次的请求体与 M4-03 逐字节相同（向后兼容面）。
+- 历史里的 `patchStyle` 只用于重建 `assistant` 消息，**不参与** `currentStyle` 的派生——`currentStyle` 的唯一来源是已校验 Document（§4.4）。
+- 历史里**不存模型输出原文**。发给模型的历史 `assistant` 消息是由 `selectedNodeId + patchProps + patchStyle` **重建**的 Patch JSON，不是回放。模型说过什么无关紧要，系统确认了什么才算历史。
 - 切换选中节点**不清空**历史（跨节点的相对指令仍然有意义）；生成新初稿会清空（文档整体替换后旧轮次已无所指）。
 
 ### messages 布局
@@ -402,23 +411,26 @@ conversationHistory  ──►  请求体 history  ──►  refine(history=…
 [system]  +  (user_1, assistant_1) … (user_N, assistant_N)  +  [user_current]     = 2N + 2
 ```
 
-- 历史 `user` 消息恰 3 键（`instruction` / `selectedNodeId` / `nodeType`）——不含 `currentProps`，历史属性值都是旧值，给了只会误导。
-- 当前轮 `user` 消息与 M4-02 逐字节相同（恰 4 键）。向后兼容面落在这里。
+- 历史 `user` 消息恰 3 键（`instruction` / `selectedNodeId` / `nodeType`）——不含 `currentProps` / `currentStyle`，历史属性值与样式值都是旧值，给了只会误导。
+- 历史 `assistant` 消息按该轮实际承载的变更重建为 props only / style only / props + style（数组内 props 在前）三种形状之一（M4-04 / DD-16）。
+- 当前轮 `user` 消息恰 5 键（M4-04 起在 M4-02 的 4 键之上追加 `currentStyle`）。向后兼容面落在这里。
 - `history` 缺省 / `null` / `[]` 三态在 wire 层归一化为同一空序列，产出的 `messages` 逐字节相同。
-- Refinement SP 在 M4-03 发生**一次受控的固定版本升级**：新增一段固定的多轮语义声明（历史仅为上下文、已生效不得重放、本轮唯一目标是最后一条 user 消息、历史同样是不可信数据）。升级后的 SP 仍**无参、逐字节稳定、不含任何请求数据**——放宽的是文本，不是性质。
+- Refinement SP 分别在 M4-03 与 M4-04 发生**两次受控的固定版本升级**：M4-03 新增一段固定的多轮语义声明（历史仅为上下文、已生效不得重放、本轮唯一目标是最后一条 user 消息、历史同样是不可信数据）；M4-04 新增 `update_style` 契约（两类 op、11 项 style 白名单与值域、相对指令基于 `currentStyle` 换算）。两次升级后的 SP 仍**无参、逐字节稳定、不含任何请求数据**——放宽的是文本，不是性质。
 
 ### 上下文预算 (Context Budget)
 
-原型阶段的目标是**给出确定的资源上界**，不是做 token 会计。因此用两个固定常量、零新依赖（不引入 tokenizer）：
+原型阶段的目标是**给出确定的资源上界**，不是做 token 会计。因此用固定常量、零新依赖（不引入 tokenizer）：
 
 | 常量 | 值 | 含义 |
 |---|---|---|
 | `MAX_HISTORY_TURNS` | 20 | 历史轮数上限 |
 | `MAX_HISTORY_CHARS` | 50000 | 序列化后历史的字符数上限 |
 | `MAX_TURN_PROPS_KEYS` | 16 | 单轮 `patchProps` 键数上限 |
+| `MAX_TURN_STYLE_KEYS` | 11 | 单轮 `patchStyle` 键数上限（= style 白名单字段数，M4-04 新增） |
 
 - 只限轮数**不足以**限住上下文规模——单个 `patchProps` 字符串值本身无长度上限。字符上界是真正的资源闸门。
-- 三个常量的**唯一事实来源**是 `provider/base.py`（全仓唯一不依赖任何业务模块的叶子模块）。`api/schemas.py` 与 `refinement/pipeline.py` 均 import 它，依赖方向恒为 `api → provider`、`refinement → provider`，不产生 `refinement → api` 的反向依赖。
+- 四个常量的**唯一事实来源**是 `provider/base.py`（全仓唯一不依赖任何业务模块的叶子模块）。`api/schemas.py` 与 `refinement/pipeline.py` 均 import 它，依赖方向恒为 `api → provider`、`refinement → provider`，不产生 `refinement → api` 的反向依赖。
+- `MAX_TURN_STYLE_KEYS = 11` 不是拍的数：一轮最多把 11 个受控字段各写一次，再多必然是未知键（已被契约层拒绝）。
 - 前端 `App.tsx` 的同名常量是**镜像**，一致性由后端测试读取前端源文本比对来守护（漂移会红灯）。
 - 超限一律 422 `invalid_request_structure`：Provider 不被调用，文档零变更。Pipeline 层对两项上界做**独立复核**，即使绕过 API 层直接调用 `refine()` 也不能突破。
 
@@ -427,9 +439,9 @@ conversationHistory  ──►  请求体 history  ──►  refine(history=…
 历史是**用户数据**，与本轮指令同级不可信。它多了一个可以写字的地方，但没有多任何权限：
 
 - 历史里的节点 id **不授予**本轮操作权限——越界候选照样被 `candidate_boundary_violation` 拒掉。
-- 历史无法扩展 op 集合（`update_props` 之外仍全部非法）、无法伪造完整性证明（证明恒由服务端重新计算）。
+- 历史无法扩展 op 集合（`update_props` / `update_style` 之外仍全部非法）、无法扩展 style 白名单（未知键一律被契约层拒绝）、无法伪造完整性证明（证明恒由服务端重新计算）。
 - 注入文本只可能出现在 `user` role；`system` role 无任何数据通道。
-- 仍按**能力**而非字符判定安全：`patchProps.text = "<div>Hello</div>"` 是合法普通字符串，必须继续被接受。
+- 仍按**能力**而非字符判定安全：`patchProps.text = "<div>Hello</div>"` 是合法普通字符串，必须继续被接受；`patchStyle` 侧的对应判据是「键在白名单内且值落在该字段值域内」，而不是对 CSS 文本做 grep。
 
 ## 待决策项 (Open Decisions)
 

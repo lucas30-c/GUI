@@ -137,13 +137,15 @@ def test_current_user_prompt_is_byte_identical_to_m402():
     assert with_history == expected
 
 
-def test_current_user_prompt_has_exactly_four_keys():
+def test_current_user_prompt_has_exactly_five_keys():
+    """Spec 010 DD-14（AP-6 批准）：当前轮 UP 由 4 键升级为 5 键，新增 currentStyle。"""
     payload = json.loads(build_refinement_messages(_context((_turn(),)))[-1]["content"])
     assert set(payload.keys()) == {
         "instruction",
         "selectedNodeId",
         "nodeType",
         "currentProps",
+        "currentStyle",
     }
 
 

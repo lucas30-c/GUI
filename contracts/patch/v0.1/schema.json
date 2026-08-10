@@ -1,5 +1,156 @@
 {
   "$defs": {
+    "Style": {
+      "additionalProperties": false,
+      "description": "受控样式模型，仅允许预定义的安全 CSS 属性",
+      "properties": {
+        "backgroundColor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Backgroundcolor"
+        },
+        "borderRadius": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Borderradius"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Color"
+        },
+        "fontSize": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fontsize"
+        },
+        "fontWeight": {
+          "anyOf": [
+            {
+              "enum": [
+                "normal",
+                "medium",
+                "semibold",
+                "bold"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fontweight"
+        },
+        "gap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Gap"
+        },
+        "height": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Height"
+        },
+        "margin": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Margin"
+        },
+        "padding": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Padding"
+        },
+        "textAlign": {
+          "anyOf": [
+            {
+              "enum": [
+                "left",
+                "center",
+                "right"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Textalign"
+        },
+        "width": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Width"
+        }
+      },
+      "title": "Style",
+      "type": "object"
+    },
     "UpdatePropsOperation": {
       "additionalProperties": false,
       "description": "单个 update_props 操作",
@@ -27,6 +178,32 @@
       ],
       "title": "UpdatePropsOperation",
       "type": "object"
+    },
+    "UpdateStyleOperation": {
+      "additionalProperties": false,
+      "description": "单个 update_style 操作（与 UpdatePropsOperation 逐项同构，DD-01）",
+      "properties": {
+        "op": {
+          "const": "update_style",
+          "title": "Op",
+          "type": "string"
+        },
+        "style": {
+          "$ref": "#/$defs/Style"
+        },
+        "targetNodeId": {
+          "minLength": 1,
+          "title": "Targetnodeid",
+          "type": "string"
+        }
+      },
+      "required": [
+        "op",
+        "targetNodeId",
+        "style"
+      ],
+      "title": "UpdateStyleOperation",
+      "type": "object"
     }
   },
   "additionalProperties": false,
@@ -34,7 +211,21 @@
   "properties": {
     "operations": {
       "items": {
-        "$ref": "#/$defs/UpdatePropsOperation"
+        "discriminator": {
+          "mapping": {
+            "update_props": "#/$defs/UpdatePropsOperation",
+            "update_style": "#/$defs/UpdateStyleOperation"
+          },
+          "propertyName": "op"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/$defs/UpdatePropsOperation"
+          },
+          {
+            "$ref": "#/$defs/UpdateStyleOperation"
+          }
+        ]
       },
       "minItems": 1,
       "title": "Operations",

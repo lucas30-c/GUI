@@ -253,18 +253,40 @@ def test_refinement_system_prompt_forbids_id_type_and_structure_changes():
     assert '"children"' in sp
 
 
-def test_refinement_system_prompt_declares_style_as_unmodifiable():
-    """Patch v0.1 的 update_props 只合并 node.props，node 级 style 无法被改。
+def test_refinement_system_prompt_declares_update_style_capability():
+    """Spec 010 DD-15：Patch v0.1 新增 update_style 后，SP 必须如实声明该能力。
 
-    SP 必须如实声明这一点：如果反过来教模型「把 style 放进 props」，产出的候选
-    100% 会被 patch 应用层拒绝——那是让契约去迁就提示词，方向是错的。
+    M4-04 之前 update_props 无法触达 node.style，SP 因此声明 style 不可改，并刻意
+    不把 DSL 的 style 白名单搬进精修 SP（否则会诱导模型产出必然失败的候选）。
+    现在 update_style 是合法操作，同一条「契约与提示词必须一致」的原则要求反转
+    这条断言：SP 必须声明 update_style、给出 11 字段白名单及其值域（AP-6 批准）。
     """
     sp = build_refinement_system_prompt()
+    # style 与 props 仍是平级字段：改样式必须走 update_style，不能塞进 props
     assert '"style"' in sp
     assert "平级" in sp
-    # 不得把 DSL 的 style 白名单搬进精修 SP（那会诱导模型产出必然失败的候选）
-    assert "borderRadius" not in sp
-    assert "backgroundColor" not in sp
+    # 新能力必须被声明
+    assert "update_style" in sp
+    assert "浅合并" in sp
+    # 11 字段白名单必须完整出现（模型据此产出必然可通过校验的候选）
+    for token in (
+        "color",
+        "backgroundColor",
+        "fontSize",
+        "fontWeight",
+        "textAlign",
+        "width",
+        "height",
+        "padding",
+        "margin",
+        "borderRadius",
+        "gap",
+    ):
+        assert token in sp, token
+    # null 删除语义
+    assert "null" in sp
+    # 旧禁令必须已被移除
+    assert "视觉样式调整暂不在本操作的能力范围内" not in sp
 
 
 def test_refinement_system_prompt_lists_modifiable_props_per_type():
@@ -300,12 +322,14 @@ def test_refinement_system_prompt_has_no_placeholder_slots():
 # ============================================================
 
 
-def test_refinement_user_prompt_contains_four_dynamic_fields():
+def test_refinement_user_prompt_contains_five_dynamic_fields():
+    """Spec 010 DD-14（AP-6 批准）：UP 由 4 键升级为 5 键，新增 currentStyle。"""
     up = build_refinement_user_prompt(
         instruction="改成红色",
         selected_node_id="hero.title",
         node_type="Heading",
         current_props={"text": "欢迎", "level": 1},
+        current_style={"fontSize": "2rem"},
     )
     payload = json.loads(up)
     assert set(payload) == {
@@ -313,11 +337,33 @@ def test_refinement_user_prompt_contains_four_dynamic_fields():
         "selectedNodeId",
         "nodeType",
         "currentProps",
+        "currentStyle",
     }
     assert payload["instruction"] == "改成红色"
     assert payload["selectedNodeId"] == "hero.title"
     assert payload["nodeType"] == "Heading"
     assert payload["currentProps"] == {"text": "欢迎", "level": 1}
+    assert payload["currentStyle"] == {"fontSize": "2rem"}
+
+
+def test_refinement_user_prompt_style_defaults_to_empty_object():
+    """current_style 缺省时仍产出 5 键，currentStyle 为空对象（不缺键）。"""
+    payload = json.loads(
+        build_refinement_user_prompt(
+            instruction="改成红色",
+            selected_node_id="hero.title",
+            node_type="Heading",
+            current_props={"text": "欢迎", "level": 1},
+        )
+    )
+    assert set(payload) == {
+        "instruction",
+        "selectedNodeId",
+        "nodeType",
+        "currentProps",
+        "currentStyle",
+    }
+    assert payload["currentStyle"] == {}
 
 
 def test_refinement_user_prompt_is_a_str():

@@ -17,12 +17,27 @@ export interface ValidationErrorDetail {
   issues: ValidationIssue[];
 }
 
-/** Patch 操作 */
-export interface PatchOperation {
+/** style patch 的值域：字符串（色值 / 尺寸 / 枚举）或 `null`（删除该样式键，DD-03@010） */
+export type StylePatchValue = string | null;
+
+/** props 变更操作（M4-03 及更早的唯一操作，形状不变） */
+export interface UpdatePropsOperation {
   op: "update_props";
   targetNodeId: string;
+  /** 候选形状：值来自网络响应，本层只保证是普通对象；标量净化在 `derivePatchProps` 完成 */
   props: Record<string, unknown>;
 }
+
+/** style 变更操作（Spec 010 DD-01）：与 props 平级，浅合并，`null` 表示删键 */
+export interface UpdateStyleOperation {
+  op: "update_style";
+  targetNodeId: string;
+  /** 候选形状：值来自网络响应，本层只保证是普通对象；值域净化在 `derivePatchStyle` 完成 */
+  style: Record<string, unknown>;
+}
+
+/** Patch 操作：以 `op` 为判别式的 discriminated union（DD-17@010） */
+export type PatchOperation = UpdatePropsOperation | UpdateStyleOperation;
 
 /** Patch 文档 */
 export interface PatchDocument {
@@ -64,6 +79,8 @@ export interface ConfirmedTurn {
   selectedNodeId: string;
   nodeType: string;
   patchProps: Record<string, PatchPropValue>;
+  /** 该轮已确认的 style 变更；为空时**省略**该键（DD-19@010，请求体与 M4-03 逐字节一致） */
+  patchStyle?: Record<string, StylePatchValue>;
 }
 
 /** 精修请求 */

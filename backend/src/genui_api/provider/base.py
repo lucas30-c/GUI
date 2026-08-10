@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 # --- 上下文预算上界（Spec 009 DD-21 / DD-22）---
@@ -18,10 +18,13 @@ MAX_HISTORY_TURNS = 20
 MAX_HISTORY_CHARS = 50_000
 # 单轮 patchProps 的键数上界。
 MAX_TURN_PROPS_KEYS = 16
+# 单轮 patchStyle 的键数上界（Spec 010 DD-22）：等于 DSL Style 白名单字段数，
+# 因为一轮最多能把 11 个受控字段各写一次，再多必然是未知键（已被契约层拒绝）。
+MAX_TURN_STYLE_KEYS = 11
 
 
 def history_char_size(turns: list[dict]) -> int:
-    """对已规范化的 4 键 camelCase 字典列表做确定性序列化并返回字符数。
+    """对已规范化的 5 键 camelCase 字典列表做确定性序列化并返回字符数。
 
     纯函数：无 I/O、无随机。API 层与 Pipeline 层调用同一函数，
     因此两侧对同一份 history 恒得出同一个数（Spec 009 DD-22）。
@@ -42,14 +45,17 @@ class ConfirmedTurn:
     selected_node_id: str
     selected_node_type: str
     patch_props: dict
+    # 该轮已确认的 style 变更（Spec 010 DD-13）。默认空 dict → M4-03 的 4 参构造保持可用。
+    patch_style: dict = field(default_factory=dict)
 
     def as_wire_dict(self) -> dict:
-        """转为 4 键 camelCase 字典（与 wire 契约一致），供尺寸计算与序列化使用。"""
+        """转为 5 键 camelCase 字典（与 wire 契约一致），供尺寸计算与序列化使用。"""
         return {
             "instruction": self.instruction,
             "selectedNodeId": self.selected_node_id,
             "nodeType": self.selected_node_type,
             "patchProps": self.patch_props,
+            "patchStyle": self.patch_style,
         }
 
 
@@ -64,6 +70,9 @@ class RefinementContext:
     document_version: str
     # 已确认对话历史（oldest → newest）。默认空 tuple → M4-02 的 5 参构造保持可用。
     conversation_history: tuple[ConfirmedTurn, ...] = ()
+    # 目标节点当前 style（Spec 010 DD-12）：由 Pipeline 从**已校验文档**派生，
+    # 不来自模型输出、不来自 history 回灌。默认空 dict → 既有构造保持可用。
+    selected_node_style: dict = field(default_factory=dict)
 
 
 class RefinementProvider(Protocol):

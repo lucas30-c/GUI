@@ -5,7 +5,7 @@ from typing import Any, List, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from genui_api.contracts.dsl import DslDocument
-from genui_api.patch.models import PatchDocument
+from genui_api.patch.models import PatchDocument, StylePatchValue
 
 # 上下文预算上界的单一事实来源是 provider/base.py（Spec 009 DD-21）。
 # 此处 import 并再导出，既保证 `from genui_api.api.schemas import MAX_HISTORY_TURNS`
@@ -14,6 +14,7 @@ from genui_api.provider.base import (  # noqa: F401  (re-export)
     MAX_HISTORY_CHARS,
     MAX_HISTORY_TURNS,
     MAX_TURN_PROPS_KEYS,
+    MAX_TURN_STYLE_KEYS,
     history_char_size,
 )
 
@@ -68,6 +69,12 @@ RegisteredNodeType = Literal[
 # 因此该限制不损失任何合法表达，却关掉了「history 变成任意嵌套 payload 通道」。
 PatchPropValue = str | int | float | bool | None
 
+# history 的 patchStyle 值域与 DSL Style 一致：全部字段都是字符串，null 表示
+# 「该轮删除了这个样式」。值类型直接复用 patch 层的 StylePatchValue（单一事实来源）。
+# 刻意**不**在 wire 层做白名单与值域校验 —— history 不参与任何判定（Spec 009 TB-3），
+# 它只是上下文；真正的 hard gate 在 Patch schema 与应用后的 DSL 全量校验处
+# （Spec 010 DD-24 / S-6）。
+
 
 class RefineHistoryTurn(BaseModel):
     """一个已确认精修轮次的请求级摘要（无 role、无模型输出原文、无 props 快照）。"""
@@ -87,6 +94,13 @@ class RefineHistoryTurn(BaseModel):
     patch_props: dict[str, PatchPropValue] = Field(
         alias="patchProps",
         max_length=MAX_TURN_PROPS_KEYS,
+    )
+    # 可选：缺省 ≡ `{}`，因此 M4-03 客户端上传的旧 history 无需任何改动即被接受
+    # （Spec 010 DD-24 / BC-7）。键数上界与 Style 白名单基数同源。
+    patch_style: dict[str, StylePatchValue] = Field(
+        alias="patchStyle",
+        default_factory=dict,
+        max_length=MAX_TURN_STYLE_KEYS,
     )
 
 

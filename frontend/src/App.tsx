@@ -16,6 +16,7 @@ import type {
   RefinementIntegrity,
   RefineLocalError,
   RefineServerError,
+  StylePatchValue,
   VerifiedRefinementIntegrity,
 } from './api/types';
 
@@ -31,6 +32,10 @@ export const MAX_HISTORY_TURNS = 20;
 
 /** 单轮 patchProps 键数上限，与后端 MAX_TURN_PROPS_KEYS 同值（DD-13@009） */
 export const MAX_TURN_PROPS_KEYS = 16;
+
+/** 单轮 patchStyle 键数上限，与后端 MAX_TURN_STYLE_KEYS 同值（DD-22@010）；
+ *  等于 DSL Style 白名单字段数——一轮最多把 11 个受控字段各写一次 */
+export const MAX_TURN_STYLE_KEYS = 11;
 
 /** 提交层完整性检查失败文案（前端自有固定文案，不含服务端原文或 document 内容） */
 export const INTEGRITY_ERROR_MESSAGES = {
@@ -77,10 +82,15 @@ function isPatchPropValue(value: unknown): value is PatchPropValue {
   );
 }
 
+/** patchStyle 值域守卫：只有字符串与 `null`（删键）能进入 history（DD-19@010 的净化规则） */
+function isStylePatchValue(value: unknown): value is StylePatchValue {
+  return value === null || typeof value === 'string';
+}
+
 /**
  * 由已通过完整性校验的响应 patch 确定性派生 `patchProps`（DD-17）：
- * 只取 `targetNodeId` 等于本次提交节点的操作 → 按数组顺序浅合并 → 丢弃非标量值
- * → 键数超过 16 时按插入顺序保留前 16 个。
+ * 只取 `op === "update_props"` 且 `targetNodeId` 等于本次提交节点的操作
+ * → 按数组顺序浅合并 → 丢弃非标量值 → 键数超过 16 时按插入顺序保留前 16 个。
  *
  * 净化使「下一轮请求必然满足后端 schema」成为前端可自证的性质。
  */
@@ -90,6 +100,7 @@ export function derivePatchProps(
 ): Record<string, PatchPropValue> {
   const merged: Record<string, PatchPropValue> = {};
   for (const operation of patch.operations) {
+    if (operation.op !== 'update_props') continue;
     if (operation.targetNodeId !== selectedNodeId) continue;
     for (const [key, value] of Object.entries(operation.props)) {
       if (!isPatchPropValue(value)) continue;
@@ -100,6 +111,34 @@ export function derivePatchProps(
   if (entries.length <= MAX_TURN_PROPS_KEYS) return merged;
   const capped: Record<string, PatchPropValue> = {};
   for (const [key, value] of entries.slice(0, MAX_TURN_PROPS_KEYS)) {
+    capped[key] = value;
+  }
+  return capped;
+}
+
+/**
+ * 由已通过完整性校验的响应 patch 确定性派生 `patchStyle`（DD-19@010，与 `derivePatchProps` 同构）：
+ * 只取 `op === "update_style"` 且 `targetNodeId` 等于本次提交节点的操作
+ * → 按数组顺序浅合并（后来者覆盖）→ 丢弃 string / null 之外的值
+ * → 键数超过 11 时按插入顺序保留前 11 个。
+ */
+export function derivePatchStyle(
+  patch: PatchDocument,
+  selectedNodeId: string,
+): Record<string, StylePatchValue> {
+  const merged: Record<string, StylePatchValue> = {};
+  for (const operation of patch.operations) {
+    if (operation.op !== 'update_style') continue;
+    if (operation.targetNodeId !== selectedNodeId) continue;
+    for (const [key, value] of Object.entries(operation.style)) {
+      if (!isStylePatchValue(value)) continue;
+      merged[key] = value;
+    }
+  }
+  const entries = Object.entries(merged);
+  if (entries.length <= MAX_TURN_STYLE_KEYS) return merged;
+  const capped: Record<string, StylePatchValue> = {};
+  for (const [key, value] of entries.slice(0, MAX_TURN_STYLE_KEYS)) {
     capped[key] = value;
   }
   return capped;
@@ -349,11 +388,14 @@ function App({ fetcher }: AppProps) {
       if (snapshotSelectedNodeId !== latestSelectedNodeIdRef.current) return;
 
       // 步骤 9：由快照 + 已校验响应 patch 确定性派生 turn，随成功提交一次 dispatch
+      // patchStyle 无键时**省略**该键 → props-only 轮次的下一次请求体与 M4-03 逐字节一致（DD-19@010）
+      const patchStyle = derivePatchStyle(result.patch, snapshotSelectedNodeId);
       const turn: ConfirmedTurn = {
         instruction: snapshot.instruction,
         selectedNodeId: snapshotSelectedNodeId,
         nodeType: snapshotNodeType,
         patchProps: derivePatchProps(result.patch, snapshotSelectedNodeId),
+        ...(Object.keys(patchStyle).length > 0 ? { patchStyle } : {}),
       };
       dispatch({
         type: 'REFINE_SUCCESS',
@@ -593,9 +635,15 @@ function App({ fetcher }: AppProps) {
                     <li key={`${operation.targetNodeId}-${index}`} data-testid="refine-patch-operation">
                       <span data-testid="refine-patch-op">{operation.op}</span>
                       <span data-testid="refine-patch-target">{operation.targetNodeId}</span>
-                      <pre data-testid="refine-patch-props">
-                        {JSON.stringify(operation.props)}
-                      </pre>
+                      {operation.op === 'update_props' ? (
+                        <pre data-testid="refine-patch-props">
+                          {JSON.stringify(operation.props)}
+                        </pre>
+                      ) : (
+                        <pre data-testid="refine-patch-style">
+                          {JSON.stringify(operation.style)}
+                        </pre>
+                      )}
                     </li>
                   ))}
                 </ul>

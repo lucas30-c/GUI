@@ -19,6 +19,7 @@ from genui_api.api.schemas import (
     MAX_HISTORY_CHARS,
     MAX_HISTORY_TURNS,
     MAX_TURN_PROPS_KEYS,
+    RefineHistoryTurn,
     RefineRequest,
 )
 from genui_api.main import create_app
@@ -220,10 +221,22 @@ def test_oversize_history_rejected_and_document_unchanged(client, provider):
 
 
 def test_history_at_char_limit_accepted(client):
-    """恰好等于字符上限 → 放行（边界包含）。"""
-    pad = MAX_HISTORY_CHARS - history_char_size([_turn(text="z")])
+    """恰好等于字符上限 → 放行（边界包含）。
+
+    Spec 010 DD-23：上界常量本身不变，但 wire turn 由 4 键升级为 5 键（校验后恒含
+    `"patchStyle":{}`），而校验器度量的是**校验后**的序列化结果。因此 pad 以
+    `RefineHistoryTurn` 的 by_alias dump 为基数计算，边界语义（恰好等于上限 → 200）
+    保持不变。
+    """
+
+    def _measured(history: list[dict]) -> int:
+        return history_char_size(
+            [RefineHistoryTurn.model_validate(t).model_dump(by_alias=True) for t in history]
+        )
+
+    pad = MAX_HISTORY_CHARS - _measured([_turn(text="z")])
     history = [_turn(text="z" * (1 + pad))]
-    assert history_char_size(history) == MAX_HISTORY_CHARS
+    assert _measured(history) == MAX_HISTORY_CHARS
     assert _post(client, _payload(history=history)).status_code == 200
 
 

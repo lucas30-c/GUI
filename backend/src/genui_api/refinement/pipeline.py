@@ -74,13 +74,19 @@ def _find_node_in_model(node: Any, target_id: str) -> Any:
     return None
 
 
-def _remove_props_from_node(doc_dict: dict, target_id: str) -> dict:
-    """深拷贝 dict 并移除目标节点的 props 字段。"""
+def _remove_mutable_fields_from_node(doc_dict: dict, target_id: str) -> dict:
+    """深拷贝 dict 并移除目标节点的可变字段（props / style）。
+
+    Spec 010 DD-20：`update_style` 让 style 成为目标节点上合法可变的字段，
+    因此剥离范围从 `{props}` 扩为 `{props, style}`，且**仅对目标节点**生效——
+    任何其他节点的 props/style 变化仍会被后续深等比较检出。
+    """
     result = copy.deepcopy(doc_dict)
     root = result.get("root", {})
     node = _find_node(root, target_id)
-    if node is not None and "props" in node:
-        del node["props"]
+    if node is not None:
+        for mutable_field in ("props", "style"):
+            node.pop(mutable_field, None)
     return result
 
 
@@ -90,13 +96,13 @@ def verify_non_target_unchanged(
     selected_node_id: str,
 ) -> bool:
     """
-    完整性验证：序列化 → 移除目标 props → 全量深等比较。
+    完整性验证：序列化 → 移除目标节点的 props/style → 全量深等比较。
     """
     original_dict = original_doc.model_dump(mode="json", by_alias=True)
     patched_dict = patched_doc.model_dump(mode="json", by_alias=True)
 
-    original_stripped = _remove_props_from_node(original_dict, selected_node_id)
-    patched_stripped = _remove_props_from_node(patched_dict, selected_node_id)
+    original_stripped = _remove_mutable_fields_from_node(original_dict, selected_node_id)
+    patched_stripped = _remove_mutable_fields_from_node(patched_dict, selected_node_id)
 
     return original_stripped == patched_stripped
 
@@ -221,13 +227,21 @@ async def refine(
         if target_node.props
         else {}
     )
+    # 目标节点当前 style（Spec 010 DD-12）：唯一来源是**已校验的源文档**。
+    # exclude_none 让「未设置」与「设置为 null」在上下文中都表现为「该键不存在」，
+    # 与 apply 层的 null 删键语义一致，模型看到的就是节点真实生效的样式。
+    target_style = (
+        target_node.style.model_dump(mode="json", by_alias=True, exclude_none=True)
+        if target_node.style
+        else {}
+    )
     context = RefinementContext(
         instruction=instruction,
         selected_node_id=trusted_selected_node_id,
         selected_node_type=target_node.type,
         selected_node_props=copy.deepcopy(target_props),
         document_version=validated_doc.version,
-        # 深拷贝 patch_props：ConfirmedTurn 本身 frozen，但其 dict 值可变；
+        # 深拷贝 patch_props / patch_style：ConfirmedTurn 本身 frozen，但其 dict 值可变；
         # Provider 对上下文的任何写入尝试都不得影响调用方持有的对象。
         conversation_history=tuple(
             ConfirmedTurn(
@@ -235,9 +249,11 @@ async def refine(
                 selected_node_id=turn.selected_node_id,
                 selected_node_type=turn.selected_node_type,
                 patch_props=copy.deepcopy(turn.patch_props),
+                patch_style=copy.deepcopy(turn.patch_style),
             )
             for turn in trusted_history
         ),
+        selected_node_style=copy.deepcopy(target_style),
     )
 
     # 步骤 5: 调用 Provider

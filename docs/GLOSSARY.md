@@ -19,13 +19,22 @@
 |------|------|
 | **Selected Node** | 用户当前在页面上选中的那个 DSL Node。以 `selectedNodeId` 形式保存在编辑会话中，属于编辑上下文，不属于 DSL 节点内容。 |
 | **Patch** | 一次局部修改请求的结构化载体，由后端产出、经校验后应用。是模型表达修改意图的**唯一**方式。 |
-| **Controlled Patch** | 一种结构化、确定性的 DSL 文档修改方式，仅允许更新已有节点的 props（不创建/删除节点、不修改 ID）。 |
+| **Controlled Patch** | 一种结构化、确定性的 DSL 文档修改方式，仅允许更新已有节点的 props 与 style（不创建/删除节点、不修改 ID）。 |
 | **Atomic Patch** | 具有原子性的 Patch：所有操作均成功且通过最终校验才生效；任一步骤失败则整体回滚，不产生部分修改。 |
 | **Source Document** | Patch 应用前的输入 DSL 文档（原始文档），不会被 Patch 过程修改。 |
 | **Patched Document** | Patch 成功应用后产生的新 DSL 文档，已通过完整校验。 |
 | **Patch Operation** | Patch 中的单个操作（如修改某 prop 的值）。每个操作必须指向目标节点的受允许属性路径。 |
 | **Target Node** | Patch 的作用对象，必须等于当前 Selected Node（或 Spec 明确允许的其内部属性）。 |
 | **Non-target Node** | 文档中除 Target Node 之外的所有节点。Patch 前后它们的规范化哈希必须完全一致（零变更）。 |
+
+## 受控样式精修
+
+| 术语 | 定义 |
+|------|------|
+| **Style Patch** | `update_style` 操作：Patch v0.1 判别联合中修改节点 `style` 的成员，语义为浅合并到 `node.style`。显式 `null` 表示删除该键（回退到未设置）；合并后 `style` 为空则该键被整体移除。与 `update_props` 可出现在同一份 Patch 中，但全部操作的 `targetNodeId` 必须等于本轮选中节点。 |
+| **Style Whitelist（样式白名单）** | DSL Style 允许的 11 个字段：`color` / `backgroundColor` / `fontSize` / `fontWeight` / `textAlign` / `width` / `height` / `padding` / `margin` / `borderRadius` / `gap`。唯一裁决者是 `contracts.dsl.Style`（`extra="forbid"`），字段值域（颜色 hex/命名色、尺寸 `px|rem|em|%`、枚举字面量）与之同源。白名单外的键、白名单内的非法值，一律使整轮候选被拒。 |
+| **currentStyle** | 精修 User Prompt 中的目标节点现行样式，只列出**已生效**字段。唯一来源是已校验 Document（`RefinementContext.selected_node_style`），既不来自模型上一轮输出，也不来自历史 `patchStyle` 回灌。它是「再大一点」「深一点」这类相对指令可解且不漂移的技术前提。 |
+| **patchStyle** | `ConfirmedTurn` 的第 5 个字段：该轮已确认的 style 变更，由响应 Patch 中命中本轮目标的 `update_style` 操作按顺序浅合并确定性派生，键数上限 `MAX_TURN_STYLE_KEYS = 11`。无键时该字段在请求体中整体省略。仅用于重建历史 `assistant` 消息，不参与 `currentStyle` 派生。 |
 
 ## 模型与校验
 
@@ -36,7 +45,7 @@
 | **Integrity Check** | 非目标子树完整性校验：对非目标节点做规范化序列化 + 哈希（或等价深比较），证明 Patch 只改了 Target Node。 |
 | **Model Provider** | 模型能力的统一接口：输入结构化意图与上下文，输出 Candidate Output。不负责裁决，只负责"翻译"。 |
 | **RefinementProvider** | Model Provider 的精修专用 Protocol（`typing.Protocol`）。定义 `async def generate_patch(context: RefinementContext) -> dict`，返回候选 Patch dict。 |
-| **RefinementContext** | 传递给 RefinementProvider 的受控上下文数据类。包含 instruction、selected_node_id、selected_node_type、selected_node_props（深拷贝）、document_version。不含完整文档（最小权限原则）。 |
+| **RefinementContext** | 传递给 RefinementProvider 的受控上下文数据类。包含 instruction、selected_node_id、selected_node_type、selected_node_props（深拷贝）、selected_node_style（深拷贝，由 Pipeline 从已校验文档派生）、document_version、conversation_history。不含完整文档（最小权限原则）。 |
 | **Mock Provider** | Model Provider 的确定性实现：用规则/预置响应模拟模型行为，与真实模型同接口，保证无外部依赖的演示路径。 |
 | **Refinement Pipeline** | 无状态异步编排函数 `refine()`，10 步确定性流程：校验指令 → 校验源文档 → 查找节点 → 构造上下文 → 调用 Provider → 校验候选结构 → 边界检查 → 应用 Patch → 完整性验证 → 返回结果。 |
 | **Trace** | 一轮对话的完整记录：输入、候选输出、各环节校验结果、应用结果、指标数据点。用于排错、指标计算与模板沉淀。 |
@@ -87,7 +96,7 @@
 | 术语 | 定义 |
 |------|------|
 | **Conversation Turn** | 一次精修交互的往返。只有服务端全部校验与前端提交层完整性检查都通过的轮次才有资格进入历史。 |
-| **Confirmed State（已确认状态）** | 一轮已确认精修的请求级摘要 `ConfirmedTurn`，恰含 `instruction` / `selectedNodeId` / `nodeType` / `patchProps` 四字段。不含模型输出原文、不含 role、不含 props 快照。失败轮与被丢弃的旧响应不产生已确认状态。 |
+| **Confirmed State（已确认状态）** | 一轮已确认精修的请求级摘要 `ConfirmedTurn`，恰含 `instruction` / `selectedNodeId` / `nodeType` / `patchProps` / `patchStyle` 五字段（末项 M4-04 新增，无键时省略）。不含模型输出原文、不含 role、不含 props / style 快照。失败轮与被丢弃的旧响应不产生已确认状态。 |
 | **Conversation History** | 前端持有的已确认轮次序列（oldest → newest），随请求以 `history` 字段发送。后端不存储任何会话；缺省 / `null` / `[]` 三态等价。 |
-| **History Reconstruction（历史重建）** | 发给模型的历史 `assistant` 消息由 `selectedNodeId + patchProps` 确定性重建为 Patch JSON，而不是回放模型原始输出。 |
-| **Context Budget（上下文预算）** | 多轮上下文的固定资源上界：轮数 `MAX_HISTORY_TURNS = 20`、序列化字符数 `MAX_HISTORY_CHARS = 50000`、单轮 `patchProps` 键数 `MAX_TURN_PROPS_KEYS = 16`。不做 token 会计、不引入 tokenizer。超限一律 422 `invalid_request_structure`。 |
+| **History Reconstruction（历史重建）** | 发给模型的历史 `assistant` 消息由 `selectedNodeId + patchProps + patchStyle` 确定性重建为 Patch JSON（props only / style only / props + style 三种形状之一），而不是回放模型原始输出。 |
+| **Context Budget（上下文预算）** | 多轮上下文的固定资源上界：轮数 `MAX_HISTORY_TURNS = 20`、序列化字符数 `MAX_HISTORY_CHARS = 50000`、单轮 `patchProps` 键数 `MAX_TURN_PROPS_KEYS = 16`、单轮 `patchStyle` 键数 `MAX_TURN_STYLE_KEYS = 11`。不做 token 会计、不引入 tokenizer。超限一律 422 `invalid_request_structure`。 |

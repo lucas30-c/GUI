@@ -2,7 +2,7 @@
 
 一句话介绍：用户用自然语言生成并多轮精修网页的受控 GenUI 原型——页面由受控 JSON DSL 驱动，模型只能通过结构化 Patch 修改用户选中的控件，其余部分零漂移。
 
-**当前状态**：M4-01 完成（一句话生成网页初稿纵向切片）。顶部输入一句自然语言需求 → `POST /api/v1/dsl/generate` 经确定性 Mock Generation Provider 产出候选 DSL → 通过完整 Schema 与业务规则校验后返回初稿 → 前端原子替换渲染，随后可直接进入 M3-02 局部精修闭环（选中节点 → `set_text:` 指令 → `POST /api/v1/dsl/refine` → 完整性检查通过后整文档替换，非目标区域零变更）。前端永不本地拼装或修改 DSL，也永不应用 `response.patch`（Patch 仅用于结果展示）。Playwright E2E 覆盖真实前后端「生成 → 选择 → 精修」全链路。
+**当前状态**：M4-04 完成（PDF 任务一全部实现）。顶部输入一句自然语言需求 → `POST /api/v1/dsl/generate` 产出候选 DSL → 通过完整 Schema 与业务规则校验后渲染初稿；随后选中任意节点即可连续多轮精修 → `POST /api/v1/dsl/refine` → 完整性检查通过后整文档替换，非目标区域零变更。精修支持 `update_props`（文案 / 属性）与 `update_style`（颜色 / 尺寸 / 布局 / 间距）两种受控操作，两者可在同一轮内组合；多轮对话上下文保留已确认轮次（含 `patchStyle`），因此「再大一点」「颜色再深一些」这类连续 relative 指令基于**当前已验证 Document** 派生的 `currentStyle` 正确工作——Document 始终是 style 的唯一事实来源，既不回灌模型原文、也不回灌历史 patch。前端永不本地拼装或修改 DSL，也永不应用 `response.patch`（Patch 仅用于结果展示）。Playwright E2E 覆盖真实前后端「生成 → 选中 → 文案精修 → 颜色精修 → 尺寸精修 → 非目标零变更」Golden Path 全链路。
 
 ## 核心原则
 
@@ -29,6 +29,9 @@
 | [specs/005-refinement-pipeline-mock-provider-api.md](specs/005-refinement-pipeline-mock-provider-api.md) | M3-01 Refinement Pipeline + Mock Provider + Refine API |
 | [specs/006-frontend-refinement-loop.md](specs/006-frontend-refinement-loop.md) | M3-02 前端局部精修闭环 |
 | [specs/007-initial-dsl-generation.md](specs/007-initial-dsl-generation.md) | M4-01 一句话生成网页初稿纵向切片 |
+| [specs/008-real-llm-prompt-strategy.md](specs/008-real-llm-prompt-strategy.md) | M4-02 真实模型接入与 SP/UP 提示词策略 |
+| [specs/009-multi-turn-context-stability.md](specs/009-multi-turn-context-stability.md) | M4-03 多轮上下文与多轮稳定性 |
+| [specs/010-controlled-style-refinement.md](specs/010-controlled-style-refinement.md) | M4-04 受控样式精修（`update_style`）与 PDF 任务一收口 |
 
 ## 计划中的技术栈
 
@@ -121,7 +124,9 @@ env GENUI_MODEL_PROVIDER=openai_compatible GENUI_LLM_API_KEY=<API_KEY> \
 真实模型 smoke 测试默认跳过，需显式 opt-in（会产生真实调用与费用）：
 
 ```bash
-GENUI_RUN_REAL_LLM=1 pytest tests/llm/test_real_smoke.py -v
+GENUI_RUN_REAL_LLM=1 pytest tests/llm/test_real_smoke.py -v              # 单轮生成 + 精修
+GENUI_RUN_REAL_LLM=1 pytest tests/llm/test_real_multi_turn_smoke.py -v   # 多轮 props relative follow-up
+GENUI_RUN_REAL_LLM=1 pytest tests/llm/test_real_style_smoke.py -v        # 多轮 style relative follow-up
 ```
 
 裸 `pytest` 恒为零真实网络调用：即使 shell 中已存在真实凭证，测试夹具也会剥离模型环境变量并跳过所有 `real_llm` 用例。
@@ -137,6 +142,8 @@ GENUI_RUN_REAL_LLM=1 pytest tests/llm/test_real_smoke.py -v
 
 ### Patch v0.1 最小示例
 
+`update_props`（修改节点属性，浅合并到 `node.props`）：
+
 ```json
 {
   "version": "0.1",
@@ -149,6 +156,23 @@ GENUI_RUN_REAL_LLM=1 pytest tests/llm/test_real_smoke.py -v
   ]
 }
 ```
+
+`update_style`（修改节点样式，浅合并到 `node.style`，仅允许 11 个白名单字段）：
+
+```json
+{
+  "version": "0.1",
+  "operations": [
+    {
+      "op": "update_style",
+      "targetNodeId": "node-heading-1",
+      "style": { "color": "#e74c3c", "fontSize": "24px" }
+    }
+  ]
+}
+```
+
+两种操作可出现在同一份 Patch 的 `operations` 数组中（同一轮既改文案又改样式），但全部操作的 `targetNodeId` 必须等于本轮选中节点，否则整轮被边界检查拒绝。
 
 ### Patch 核心 Python 调用示例
 
@@ -165,11 +189,11 @@ patch = {
 patched = apply_patch(source_doc, patch)  # 返回校验通过的 DslDocument
 ```
 
-> **注意**：Patch HTTP API 尚未实现。当前仅可通过 Python 函数调用 `apply_patch()`。
+> Patch 由 `POST /api/v1/dsl/refine` 在服务端产出并应用；`apply_patch()` 是同一套确定性引擎的 Python 入口，供测试与脚本直接调用。
 
 ## 尚未实现
 
-多类 Patch（当前仅 `update_props`）、通过 Patch 修改节点 `style`、多轮对话上下文、模板推荐与自进化、指标面板、Undo/Redo——全部待后续 Spec 驱动开发。
+模板推荐与自进化、指标面板、Undo/Redo——全部待后续 Spec（PDF 任务二及之后）驱动开发。
 
 真实模型已接入（M4-02），但前端 UI 仍不提供模型切换入口：切换靠环境变量。Mock Provider 保留为离线基线，不被真实模型替代。
 
@@ -177,8 +201,8 @@ patched = apply_patch(source_doc, patch)  # 返回校验通过的 DslDocument
 
 | 里程碑 | 最新定义 |
 |--------|----------|
-| M4 | 完成 PDF 任务一：一句话生成初稿、真实模型接入、SP/UP（系统提示词/用户提示词）策略、自然语言局部精修、多类 Patch、多轮上下文 |
+| M4 | 完成 PDF 任务一：一句话生成初稿、真实模型接入、SP/UP（系统提示词/用户提示词）策略、自然语言局部精修、多类 Patch、多轮上下文 — ✅ 已完成 |
 | M5 | 完成 PDF 任务二：模板推荐、自进化、指标、个性化、冷启动 |
 | M6 | 完整面试交付：覆盖矩阵、设计文档、架构图、Demo 脚本、追问题库、降级预案 |
 
-M4 已交付的纵向切片：**M4-01 一句话生成网页初稿纵向切片**、**M4-02 真实模型接入与 SP/UP 提示词策略**（本轮）。里程碑细节详见 [docs/ARCHITECTURE.md §17](docs/ARCHITECTURE.md)。
+M4 已交付的纵向切片：**M4-01 一句话生成网页初稿纵向切片**、**M4-02 真实模型接入与 SP/UP 提示词策略**、**M4-03 多轮上下文与多轮稳定性**、**M4-04 受控样式精修（`update_style`）与 PDF 任务一收口**（本轮）。至此 PDF 任务一的全部 requirement 均已实现并有机械证据。里程碑细节详见 [docs/ARCHITECTURE.md §17](docs/ARCHITECTURE.md)。

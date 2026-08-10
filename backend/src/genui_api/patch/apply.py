@@ -111,9 +111,27 @@ def _apply_patch_impl(document: dict, patch: dict) -> DslDocument:
                     )
                 ],
             )
-        # 步骤 4c：浅合并 props
-        existing_props = node.get("props", {})
-        node["props"] = {**existing_props, **operation.props}
+        # 步骤 4c：按操作类型浅合并到对应字段
+        if operation.op == "update_props":
+            existing_props = node.get("props") or {}
+            node["props"] = {**existing_props, **operation.props}
+        else:
+            # update_style：浅合并 style，null 值表示删除该键（SS-1 / SS-2）
+            existing_style = node.get("style") or {}
+            candidate_style = operation.style.model_dump(
+                mode="json", by_alias=True, exclude_unset=True
+            )
+            merged = {**existing_style}
+            for key, value in candidate_style.items():
+                if value is None:
+                    merged.pop(key, None)
+                else:
+                    merged[key] = value
+            # 空 style 归一化：合并后为空则移除 style 键（SS-3）
+            if merged:
+                node["style"] = merged
+            else:
+                node.pop("style", None)
 
     # 步骤 5：后校验
     _validate_patched_document(working_doc)
@@ -207,11 +225,26 @@ def _map_pydantic_error_to_code(err: dict, loc_parts: List[str]) -> str:
     if "op" in loc_parts and "literal" in err_type:
         return "invalid_op"
 
+    # discriminated union 的 op 标签缺失/未知（DD-28：仍归为 invalid_op）
+    if "union_tag" in err_type:
+        return "invalid_op"
+
     # targetNodeId 为空或纯空白
     if "targetNodeId" in loc_parts or "target_node_id" in loc_parts:
         if "too_short" in err_type or "空白" in msg:
             return "empty_target_node_id"
         return "invalid_target_node_id"
+
+    # style 内部错误（DD-28）：loc 形如 operations.0.update_style.style[.<key>]
+    if "style" in loc_parts:
+        style_idx = loc_parts.index("style")
+        if style_idx + 1 < len(loc_parts):
+            # 定位到 style 中的某个键
+            if "extra" in err_type:
+                return "unknown_style_key"
+            return "invalid_style_value"
+        # 定位到 style 本身（缺失 / 类型不符）
+        return "schema_error"
 
     # props 为空
     if "props" in loc_parts and ("空" in msg or "empty" in msg):
@@ -229,6 +262,8 @@ def _map_pydantic_error_to_code(err: dict, loc_parts: List[str]) -> str:
     if "value_error" in err_type:
         if "空白" in msg:
             return "empty_target_node_id"
+        if "style" in msg and ("空" in msg or "empty" in msg):
+            return "empty_style"
         if "空" in msg or "empty" in msg.lower():
             return "empty_props"
         if "json" in msg.lower() or "兼容" in msg:

@@ -298,6 +298,7 @@ async def refine_dsl(
             selected_node_id=t.selected_node_id,
             selected_node_type=t.node_type,
             patch_props=dict(t.patch_props),
+            patch_style=dict(t.patch_style),
         )
         for t in (req.history or ())
     )
@@ -342,18 +343,25 @@ async def refine_dsl(
         )
 
     # 成功
-    return JSONResponse(
-        status_code=200,
-        content=RefineSuccess(
-            success=True,
-            patch=result.patch,
-            document=result.document,
-            integrity=RefinementIntegrity(
-                selectedNodeId=result.integrity["selectedNodeId"],
-                nonTargetNodesUnchanged=True,
-            ),
-        ).model_dump(mode="json", by_alias=True),
+    success = RefineSuccess(
+        success=True,
+        patch=result.patch,
+        document=result.document,
+        integrity=RefinementIntegrity(
+            selectedNodeId=result.integrity["selectedNodeId"],
+            nonTargetNodesUnchanged=True,
+        ),
     )
+    content = success.model_dump(mode="json", by_alias=True)
+    # patch 子树改用 exclude_unset 导出（Spec 010 DD-06）：Style 的 11 个字段都有
+    # None 默认值，普通导出会把「候选未提及的样式」写成 null，与「显式 null = 删除
+    # 该样式」混淆，前端无法据此还原本轮真实的 style 变更。exclude_unset 只保留候选
+    # 真正给出的键（含显式 null），因此 echo 与候选逐键一致；update_props 只含无默认
+    # 值的字段，该路径的输出与 M4-03 逐字节相同。
+    content["patch"] = success.patch.model_dump(
+        mode="json", by_alias=True, exclude_unset=True
+    )
+    return JSONResponse(status_code=200, content=content)
 
 
 # ============================================================

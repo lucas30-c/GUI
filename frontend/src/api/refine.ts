@@ -41,16 +41,20 @@ function isNonEmptyString(value: unknown): value is string {
 }
 
 /**
- * 单条 operation 结构守卫：对象 + op === "update_props"
- * + targetNodeId 为非空字符串 + props 为普通对象。
- * 下游（`derivePatchProps` / Patch 列表展示）会结构化读取这三个字段，
+ * 单条 operation 结构守卫：按 `op` 判别式分派（DD-17@010）。
+ * - `update_props` → targetNodeId 为非空字符串 + props 为普通对象
+ * - `update_style` → targetNodeId 为非空字符串 + style 为普通对象
+ * - 其他（未知 op / 缺 op）→ 一律拒绝
+ * 下游（`derivePatchProps` / `derivePatchStyle` / Patch 列表展示）会结构化读取这些字段，
  * 因此逐条校验必须在本层完成，不能只检查 operations 是数组。
+ * TS 类型不产生任何运行时保护，判别必须是**运行时**检查。
  */
 function isPatchOperationShape(value: unknown): value is PatchOperation {
   if (!isRecord(value)) return false;
-  if (value.op !== 'update_props') return false;
   if (!isNonEmptyString(value.targetNodeId)) return false;
-  return isRecord(value.props);
+  if (value.op === 'update_props') return isRecord(value.props);
+  if (value.op === 'update_style') return isRecord(value.style);
+  return false;
 }
 
 /** C-2：patch 基本结构 — 对象 + version === "0.1" + operations 为数组且每一条结构合法 */
