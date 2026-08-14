@@ -6,14 +6,13 @@ import copy
 import pytest
 
 from genui_api.contracts.dsl import DslDocument
-from genui_api.generation.base import UnrecognizedIntentError
-from genui_api.generation.mock import MockGenerationProvider
 from genui_api.generation.pipeline import (
     MAX_PROMPT_LENGTH,
     GenerationError,
     generate_document,
 )
-from genui_api.generation.templates import TEMPLATE_COFFEE_SHOP
+from tests.doubles.generation import MockGenerationProvider
+from tests.doubles.templates import TEMPLATE_COFFEE_SHOP
 
 
 def _run(coro):
@@ -47,11 +46,6 @@ class FixedCandidateProvider:
 
     async def generate_draft(self, prompt: str):
         return self.candidate
-
-
-class UnrecognizedProvider:
-    async def generate_draft(self, prompt: str) -> dict:
-        raise UnrecognizedIntentError("no intent")
 
 
 class CrashingProvider:
@@ -156,16 +150,16 @@ def test_prompt_exactly_at_limit_is_accepted():
     provider = CountingProvider()
     prompt = "咖" + "a" * (MAX_PROMPT_LENGTH - 1)
     assert len(prompt) == MAX_PROMPT_LENGTH
-    result = _run(generate_document(prompt, provider))
-    assert isinstance(result, DslDocument)
+    outcome = _run(generate_document(prompt, provider))
+    assert isinstance(outcome.document, DslDocument)
     assert provider.calls == [prompt]
 
 
 def test_prompt_is_trimmed_before_length_check():
     provider = CountingProvider()
     prompt = "   " + "a" * MAX_PROMPT_LENGTH + "   "
-    result = _run(generate_document(prompt, provider))
-    assert isinstance(result, DslDocument)
+    outcome = _run(generate_document(prompt, provider))
+    assert isinstance(outcome.document, DslDocument)
     # 步 3 传入的是 trim 后的 prompt
     assert provider.calls == ["a" * MAX_PROMPT_LENGTH]
 
@@ -181,13 +175,6 @@ def test_invalid_prompt_error_carries_issues():
 # ============================================================
 # 步 3 / 4：Provider 异常分类
 # ============================================================
-
-
-def test_unrecognized_intent_maps_to_unrecognized_intent_code():
-    with pytest.raises(GenerationError) as exc:
-        _run(generate_document("随便来点什么", UnrecognizedProvider()))
-    assert exc.value.code == "unrecognized_intent"
-    assert exc.value.issues[0].code == "unrecognized_intent"
 
 
 def test_provider_crash_maps_to_provider_error_with_sanitized_message():
@@ -286,17 +273,22 @@ def test_root_not_page_candidate_is_rejected():
 
 
 def test_successful_generation_returns_dsl_document():
-    result = _run(generate_document("咖啡店落地页", MockGenerationProvider()))
+    outcome = _run(generate_document("咖啡店落地页", MockGenerationProvider()))
+    result = outcome.document
     assert isinstance(result, DslDocument)
     assert result.version == "0.1"
     assert result.root.type == "Page"
     assert result.root.id == "page"
+    assert outcome.attempts == 1
+    assert outcome.repair_used is False
 
 
 def test_successful_generation_with_mock_provider_is_deterministic():
     first = _run(generate_document("咖啡店落地页", MockGenerationProvider()))
     second = _run(generate_document("咖啡店落地页", MockGenerationProvider()))
-    assert first.model_dump(mode="json") == second.model_dump(mode="json")
+    assert first.document.model_dump(mode="json") == second.document.model_dump(
+        mode="json"
+    )
 
 
 def test_pipeline_does_not_mutate_provider_candidate_source():
@@ -322,9 +314,8 @@ def test_pipeline_source_has_single_validation_entry_and_no_copied_rules():
         / "pipeline.py"
     ).read_text()
     assert source.count("validate_dsl_document(") == 1
-    # 未复制任何 DSL 校验规则
+    # 未复制任何 DSL 校验规则常量（repair 约束文案引用错误 code 不算复制规则）
     for forbidden in (
-        "duplicate",
         "FORM_ALLOWED_CHILDREN",
         "CONTAINER_TYPES",
         "LEAF_TYPES",

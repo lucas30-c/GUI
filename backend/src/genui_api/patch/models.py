@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from genui_api.contracts.dsl import Style
 
-# wire 层 style 值域：11 个字段的合法值全部是字符串，null 表示删除该键（DD-03 / DD-07）。
+# wire 层 style 值域：12 个字段的合法值全部是字符串，null 表示删除该键（DD-03 / DD-07）。
 # 此别名用于文档化与前后端对齐；键白名单与值域的唯一事实来源仍是 contracts.dsl.Style。
 StylePatchValue = str | None
 
@@ -54,7 +54,7 @@ class UpdateStyleOperation(BaseModel):
 
     op: Literal["update_style"]
     target_node_id: str = Field(alias="targetNodeId", min_length=1)
-    # 复用 DSL 的 Style 模型（DD-02）：11 字段白名单与值域只有一个事实来源，
+    # 复用 DSL 的 Style 模型（DD-02）：12 字段白名单与值域只有一个事实来源，
     # 未知键由 Style 的 extra="forbid" 在 Patch schema 层即被拒绝。
     style: Style
 

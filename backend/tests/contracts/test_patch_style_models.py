@@ -235,7 +235,7 @@ class TestUpdateStyleNegative:
             ({"fontWeight": "800"}, "字重非枚举"),
             ({"textAlign": "justify"}, "对齐非枚举"),
             ({"width": "calc(100% - 2px)"}, "calc 表达式"),
-            ({"padding": "8px 16px"}, "多值简写"),
+            ({"padding": "8px auto"}, "padding 不允许 auto"),
         ],
     )
     def test_invalid_style_value_rejected(self, style: dict, desc: str):
@@ -389,21 +389,18 @@ class TestStyleWhitelistSingleSource:
         """UpdateStyleOperation.style 的注解就是 DSL 的 Style 模型"""
         assert UpdateStyleOperation.model_fields["style"].annotation is Style
 
-    def test_whitelist_has_exactly_eleven_fields(self):
-        """白名单恰为 11 个字段"""
-        assert len(Style.model_fields) == 11
+    def test_whitelist_has_exactly_31_fields(self):
+        """白名单恰为 31 个字段"""
+        assert len(Style.model_fields) == 31
         assert set(Style.model_fields) == {
-            "color",
-            "backgroundColor",
-            "fontSize",
-            "fontWeight",
-            "textAlign",
-            "width",
-            "height",
-            "padding",
-            "margin",
-            "borderRadius",
-            "gap",
+            "margin", "marginTop", "marginRight", "marginBottom", "marginLeft",
+            "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+            "gap", "rowGap", "columnGap",
+            "width", "height", "maxWidth", "minWidth",
+            "color", "backgroundColor",
+            "fontSize", "fontWeight", "textAlign", "lineHeight",
+            "display", "flexDirection", "justifyContent", "alignItems",
+            "borderWidth", "borderStyle", "borderColor", "borderRadius",
         }
 
     def test_exported_schema_declares_update_style(self):

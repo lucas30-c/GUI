@@ -661,7 +661,13 @@ describe('B. 额外字段丢弃与本地错误文案净化', () => {
       jsonFetcher(422, failureBody({ document: baseDocument, patch: { version: '0.1', operations: [] } })),
     )
     if (result.kind !== 'server') throw new Error('期望 server')
-    expect(Object.keys(result).sort()).toEqual(['code', 'issues', 'kind', 'message'])
+    expect(Object.keys(result).sort()).toEqual([
+      'code',
+      'issues',
+      'kind',
+      'message',
+      'requestId',
+    ])
     expect(result).not.toHaveProperty('document')
     expect(result).not.toHaveProperty('patch')
   })

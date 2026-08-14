@@ -259,7 +259,7 @@ def test_refinement_system_prompt_declares_update_style_capability():
     M4-04 之前 update_props 无法触达 node.style，SP 因此声明 style 不可改，并刻意
     不把 DSL 的 style 白名单搬进精修 SP（否则会诱导模型产出必然失败的候选）。
     现在 update_style 是合法操作，同一条「契约与提示词必须一致」的原则要求反转
-    这条断言：SP 必须声明 update_style、给出 11 字段白名单及其值域（AP-6 批准）。
+    这条断言：SP 必须声明 update_style、给出 12 字段白名单及其值域（AP-6 批准）。
     """
     sp = build_refinement_system_prompt()
     # style 与 props 仍是平级字段：改样式必须走 update_style，不能塞进 props
@@ -268,7 +268,7 @@ def test_refinement_system_prompt_declares_update_style_capability():
     # 新能力必须被声明
     assert "update_style" in sp
     assert "浅合并" in sp
-    # 11 字段白名单必须完整出现（模型据此产出必然可通过校验的候选）
+    # 12 字段白名单必须完整出现（模型据此产出必然可通过校验的候选）
     for token in (
         "color",
         "backgroundColor",

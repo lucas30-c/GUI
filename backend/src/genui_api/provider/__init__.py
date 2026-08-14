@@ -1,4 +1,4 @@
 from genui_api.provider.base import RefinementProvider, RefinementContext
-from genui_api.provider.mock import MockProvider
 
-__all__ = ["RefinementProvider", "RefinementContext", "MockProvider"]
+# Real-Provider-only：Mock 已从生产源码树移除，测试替身见 tests/doubles。
+__all__ = ["RefinementProvider", "RefinementContext"]

@@ -35,19 +35,44 @@ NodeId = Annotated[
 ]
 
 # ============================================================
-# 受控 Style 模型（全部可选字段，extra=forbid）
+# 受控 Style 模型 v2（Box Model + Layout + Typography + Border）
 # ============================================================
 
 # 颜色格式：# + 3-8 位 hex，或命名色白名单
 _COLOR_HEX_RE = re.compile(r"^#[0-9a-fA-F]{3,8}$")
 _NAMED_COLORS = frozenset(["black", "white", "transparent"])
 
-# 尺寸格式：数字 + 单位(px|rem|em|%)
-_SIZE_RE = re.compile(r"^\d+(\.\d+)?(px|rem|em|%)$")
+# CssLength：允许 "0"（无单位零值）或 数字+单位
+_CSS_LENGTH_RE = re.compile(r"^(0|[0-9]+(\.[0-9]+)?(px|rem|em|%))$")
+
+# MarginAtom：CssLength 或 "auto"
+_MARGIN_ATOM_RE = re.compile(r"^(auto|0|[0-9]+(\.[0-9]+)?(px|rem|em|%))$")
+
+# MarginShorthand：1-4 个 MarginAtom 空格分隔
+_MARGIN_SHORTHAND_RE = re.compile(
+    r"^(auto|0|[0-9]+(\.[0-9]+)?(px|rem|em|%))"
+    r"( (auto|0|[0-9]+(\.[0-9]+)?(px|rem|em|%))){0,3}$"
+)
+
+# PaddingShorthand：1-4 个 CssLength 空格分隔（不允许 auto）
+_PADDING_SHORTHAND_RE = re.compile(
+    r"^(0|[0-9]+(\.[0-9]+)?(px|rem|em|%))"
+    r"( (0|[0-9]+(\.[0-9]+)?(px|rem|em|%))){0,3}$"
+)
+
+# LineHeight：CssLength 或 无单位非负数字倍数（CSS 标准行高写法，如 "1.5"）
+_LINE_HEIGHT_RE = re.compile(
+    r"^(0|[0-9]+(\.[0-9]+)?(px|rem|em|%)|[0-9]+(\.[0-9]+)?)$"
+)
+
+# 注入安全正则：不允许分号、括号、url()、expression() 等
+_UNSAFE_RE = re.compile(r"[;(){}]|url\s*\(|expression\s*\(|javascript\s*:", re.IGNORECASE)
 
 
 def _validate_color(v: str) -> str:
     """校验颜色值：# + 3-8 位 hex 或命名色白名单"""
+    if _UNSAFE_RE.search(v):
+        raise ValueError(f"颜色值包含非法字符，实际值: {v!r}")
     if _COLOR_HEX_RE.match(v) or v in _NAMED_COLORS:
         return v
     raise ValueError(
@@ -56,49 +81,172 @@ def _validate_color(v: str) -> str:
     )
 
 
-def _validate_size(v: str) -> str:
-    """校验尺寸值：数字 + (px|rem|em|%)"""
-    if _SIZE_RE.match(v):
+def _validate_css_length(v: str) -> str:
+    """校验 CssLength：'0' 或 数字+单位"""
+    if _UNSAFE_RE.search(v):
+        raise ValueError(f"尺寸值包含非法字符，实际值: {v!r}")
+    if _CSS_LENGTH_RE.match(v):
         return v
     raise ValueError(
-        f"尺寸值必须为 数字+单位(px/rem/em/%)，实际值: {v!r}"
+        f"尺寸值必须为 '0' 或 数字+单位(px/rem/em/%)，实际值: {v!r}"
+    )
+
+
+def _validate_margin_atom(v: str) -> str:
+    """校验 MarginAtom：CssLength 或 'auto'"""
+    if _UNSAFE_RE.search(v):
+        raise ValueError(f"margin 值包含非法字符，实际值: {v!r}")
+    if _MARGIN_ATOM_RE.match(v):
+        return v
+    raise ValueError(
+        f"margin 值必须为 '0'、数字+单位(px/rem/em/%) 或 'auto'，实际值: {v!r}"
+    )
+
+
+def _validate_margin_shorthand(v: str) -> str:
+    """校验 MarginShorthand：1-4 个 MarginAtom 空格分隔"""
+    if _UNSAFE_RE.search(v):
+        raise ValueError(f"margin 值包含非法字符，实际值: {v!r}")
+    if _MARGIN_SHORTHAND_RE.match(v):
+        return v
+    raise ValueError(
+        f"margin 必须为 1-4 个值（'0'/数字+单位/'auto'）空格分隔，实际值: {v!r}"
+    )
+
+
+def _validate_padding_shorthand(v: str) -> str:
+    """校验 PaddingShorthand：1-4 个 CssLength 空格分隔（不允许 auto）"""
+    if _UNSAFE_RE.search(v):
+        raise ValueError(f"padding 值包含非法字符，实际值: {v!r}")
+    if _PADDING_SHORTHAND_RE.match(v):
+        return v
+    raise ValueError(
+        f"padding 必须为 1-4 个值（'0'/数字+单位）空格分隔，不允许 auto，实际值: {v!r}"
+    )
+
+
+def _validate_line_height(v: str) -> str:
+    """校验 LineHeight：CssLength 或无单位非负数字倍数（如 "1.5"）"""
+    if _UNSAFE_RE.search(v):
+        raise ValueError(f"lineHeight 值包含非法字符，实际值: {v!r}")
+    if _LINE_HEIGHT_RE.match(v):
+        return v
+    raise ValueError(
+        f"lineHeight 必须为 '0'、数字+单位(px/rem/em/%) 或无单位非负数字倍数，"
+        f"实际值: {v!r}"
     )
 
 
 class Style(BaseModel):
-    """受控样式模型，仅允许预定义的安全 CSS 属性"""
+    """受控 Style DSL v2 — Box Model + Layout + Typography + Border。
+
+    31 个白名单字段，extra=forbid 拒绝一切未列出属性。
+    每个字段使用其专属值域类型（CssLength / MarginAtom / MarginShorthand /
+    PaddingShorthand / LineHeight / Color / 枚举），不再共用单一尺寸正则。
+    字段的机器可读元数据由 contracts.style_registry 从本模型派生（单一事实来源）。
+    """
 
     model_config = ConfigDict(extra="forbid")
 
+    # --- Box Model: Margin ---
+    margin: Optional[str] = None                  # shorthand 1-4 MarginAtom
+    marginTop: Optional[str] = None               # MarginAtom
+    marginRight: Optional[str] = None             # MarginAtom
+    marginBottom: Optional[str] = None            # MarginAtom
+    marginLeft: Optional[str] = None              # MarginAtom
+
+    # --- Box Model: Padding ---
+    padding: Optional[str] = None                 # shorthand 1-4 CssLength
+    paddingTop: Optional[str] = None              # CssLength
+    paddingRight: Optional[str] = None            # CssLength
+    paddingBottom: Optional[str] = None           # CssLength
+    paddingLeft: Optional[str] = None             # CssLength
+
+    # --- Box Model: Gap ---
+    gap: Optional[str] = None                     # CssLength
+    rowGap: Optional[str] = None                  # CssLength
+    columnGap: Optional[str] = None               # CssLength
+
+    # --- Sizing ---
+    width: Optional[str] = None                   # CssLength
+    height: Optional[str] = None                  # CssLength
+    maxWidth: Optional[str] = None                # CssLength
+    minWidth: Optional[str] = None                # CssLength
+
+    # --- Color ---
     color: Optional[str] = None
     backgroundColor: Optional[str] = None
-    fontSize: Optional[str] = None
+
+    # --- Typography ---
+    fontSize: Optional[str] = None                # CssLength
     fontWeight: Optional[Literal["normal", "medium", "semibold", "bold"]] = None
     textAlign: Optional[Literal["left", "center", "right"]] = None
-    width: Optional[str] = None
-    height: Optional[str] = None
-    padding: Optional[str] = None
-    margin: Optional[str] = None
-    borderRadius: Optional[str] = None
-    gap: Optional[str] = None
+    lineHeight: Optional[str] = None              # LineHeight（CssLength 或无单位倍数）
 
-    @field_validator("color", "backgroundColor", mode="after")
+    # --- Layout ---
+    display: Optional[Literal["block", "flex", "grid", "inline", "none"]] = None
+    flexDirection: Optional[Literal["row", "column", "row-reverse", "column-reverse"]] = None
+    justifyContent: Optional[Literal[
+        "flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"
+    ]] = None
+    alignItems: Optional[Literal[
+        "flex-start", "flex-end", "center", "stretch", "baseline"
+    ]] = None
+
+    # --- Border ---
+    borderWidth: Optional[str] = None             # CssLength
+    borderStyle: Optional[Literal["solid", "dashed", "dotted", "none"]] = None
+    borderColor: Optional[str] = None
+    borderRadius: Optional[str] = None            # CssLength
+
+    # --- Validators ---
+
+    @field_validator("color", "backgroundColor", "borderColor", mode="after")
     @classmethod
     def _check_color(cls, v: Optional[str]) -> Optional[str]:
-        """校验颜色字段值"""
         if v is not None:
             return _validate_color(v)
         return v
 
     @field_validator(
-        "fontSize", "width", "height", "padding", "margin",
-        "borderRadius", "gap", mode="after"
+        "fontSize", "width", "height", "maxWidth", "minWidth",
+        "gap", "rowGap", "columnGap",
+        "borderWidth", "borderRadius",
+        "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+        mode="after",
     )
     @classmethod
-    def _check_size(cls, v: Optional[str]) -> Optional[str]:
-        """校验尺寸字段值"""
+    def _check_css_length(cls, v: Optional[str]) -> Optional[str]:
         if v is not None:
-            return _validate_size(v)
+            return _validate_css_length(v)
+        return v
+
+    @field_validator("lineHeight", mode="after")
+    @classmethod
+    def _check_line_height(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return _validate_line_height(v)
+        return v
+
+    @field_validator("margin", mode="after")
+    @classmethod
+    def _check_margin(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return _validate_margin_shorthand(v)
+        return v
+
+    @field_validator("marginTop", "marginRight", "marginBottom", "marginLeft", mode="after")
+    @classmethod
+    def _check_margin_atom(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return _validate_margin_atom(v)
+        return v
+
+    @field_validator("padding", mode="after")
+    @classmethod
+    def _check_padding(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None:
+            return _validate_padding_shorthand(v)
         return v
 
 

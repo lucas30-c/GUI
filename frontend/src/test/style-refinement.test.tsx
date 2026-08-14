@@ -522,7 +522,8 @@ describe('D. derivePatchStyle', () => {
 
   it(`键数超过 ${MAX_TURN_STYLE_KEYS} 时按插入顺序保留前 ${MAX_TURN_STYLE_KEYS} 个`, () => {
     const style: Record<string, unknown> = {}
-    for (let index = 0; index < 14; index += 1) style[`k${index}`] = `v${index}`
+    const overflow = MAX_TURN_STYLE_KEYS + 3
+    for (let index = 0; index < overflow; index += 1) style[`k${index}`] = `v${index}`
     const result = derivePatchStyle(
       patch([{ op: 'update_style', targetNodeId: TARGET, style }]),
       TARGET,

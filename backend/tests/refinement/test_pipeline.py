@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from genui_api.provider.base import RefinementContext, RefinementProvider
-from genui_api.provider.mock import MockProvider
+from tests.doubles.refinement import MockProvider
 from genui_api.refinement.pipeline import (
     RefinementError,
     RefinementResult,

@@ -57,8 +57,9 @@ function sanitizeIssues(value: unknown): ValidationIssue[] {
   return issues;
 }
 
-/** G-7：失败响应净化 — 只提取 code / message / issues，丢弃 document / trace 等一切额外字段 */
-function toServerError(rawError: unknown): GenerateServerError | null {
+/** G-7：失败响应净化 — 只提取 code / message / issues，丢弃 document / trace 等一切额外字段。
+ *  requestId 来自失败 envelope 顶层（或响应头 X-Request-ID），由调用方传入。 */
+function toServerError(rawError: unknown, requestId: string): GenerateServerError | null {
   if (!isRecord(rawError)) return null;
   if (typeof rawError.code !== 'string') return null;
   const message =
@@ -69,6 +70,7 @@ function toServerError(rawError: unknown): GenerateServerError | null {
     kind: 'server',
     code: rawError.code,
     message,
+    requestId,
     issues: sanitizeIssues(rawError.issues),
   };
 }
@@ -112,8 +114,12 @@ export async function generateDraft(
   if (success !== isHttpOk) return localError('invalid_response');
 
   if (!success) {
-    // G-7
-    const serverError = toServerError(raw.error);
+    // G-7；requestId：envelope 顶层优先，响应头兜底
+    const requestId =
+      typeof raw.requestId === 'string'
+        ? raw.requestId
+        : response.headers.get('X-Request-ID') ?? '';
+    const serverError = toServerError(raw.error, requestId);
     if (serverError === null) return localError('invalid_response');
     return serverError;
   }

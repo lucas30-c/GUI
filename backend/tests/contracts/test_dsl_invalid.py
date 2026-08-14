@@ -246,7 +246,7 @@ class TestUnknownPropsField:
 class TestUnknownStyleField:
     """未知 style 字段"""
 
-    @pytest.mark.parametrize("bad_field", ["display", "position", "zIndex"])
+    @pytest.mark.parametrize("bad_field", ["position", "zIndex", "opacity"])
     def test_forbidden_style_field_rejected(self, bad_field: str):
         """style 中有未允许字段应被拒绝"""
         data = {
@@ -576,9 +576,11 @@ class TestStyleValueConstraints:
             ("fontSize", "auto", "尺寸不允许 auto"),
             ("width", "fit-content", "尺寸不允许 fit-content"),
             ("height", "auto", "尺寸不允许 auto"),
-            ("padding", "16px 8px", "多值简写不允许"),
-            ("margin", "0 auto", "多值简写不允许"),
-            ("margin", "auto", "auto 不允许"),
+            ("padding", "16px auto", "padding 不允许 auto"),
+            ("padding", "1px 2px 3px 4px 5px", "padding shorthand 最多 4 值"),
+            ("margin", "1px 2px 3px 4px 5px", "margin shorthand 最多 4 值"),
+            ("margin", "abc", "非法 margin 值"),
+            ("display", "inline-block", "display 只允许 block/flex/grid/inline/none"),
         ],
     )
     def test_invalid_style_value_rejected(self, field: str, bad_value: str, desc: str):

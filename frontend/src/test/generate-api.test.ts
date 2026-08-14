@@ -439,7 +439,13 @@ describe('H. G-7 失败响应净化', () => {
     if (result.kind !== 'server') throw new Error('应为 server')
     const record: Record<string, unknown> = { ...result }
     expect(record.document).toBeUndefined()
-    expect(Object.keys(record).sort()).toEqual(['code', 'issues', 'kind', 'message'])
+    expect(Object.keys(record).sort()).toEqual([
+      'code',
+      'issues',
+      'kind',
+      'message',
+      'requestId',
+    ])
   })
 
   it('AC-50: error 内的额外字段（trace / stack）被丢弃', async () => {

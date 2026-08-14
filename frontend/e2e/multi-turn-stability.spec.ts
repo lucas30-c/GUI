@@ -3,8 +3,9 @@ import { test, expect } from '@playwright/test';
 /**
  * M4-03 多轮上下文稳定性 E2E（Spec 009「E2E 场景：浏览器内 3 连轮」）。
  *
- * 前后端由 playwright.config.ts 的 webServer 数组统一启动：
- * FastAPI（MockProvider / MockGenerationProvider 为默认 Provider）与 Vite dev server。
+ * 前后端由 playwright.config.ts 的 webServer 数组统一启动（干净进程）：
+ * 确定性轨道 —— FastAPI 经 tests/e2e_app.py 注入测试替身（仅测试范围）与
+ * Vite dev server（5173 → 8000）。
  *
  * 断言的是「多轮之后仍然只改该改的」这一稳定性性质：
  * 目标节点逐轮更新、两个见证节点文案零变更、已确认轮次计数 1 → 2 → 3、

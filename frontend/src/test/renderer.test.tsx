@@ -410,17 +410,17 @@ describe('DslRenderer', () => {
         props: { text: 'No bad style' },
         style: { color: 'blue' } as TextNode['style'],
       }
-      // Add unknown field to test filtering
+      // Add unknown field to test filtering（display 已在 Style v2 白名单内，改用真正未知字段）
       const nodeWithBadStyle = {
         ...textNode,
-        style: { ...textNode.style, display: 'flex', position: 'absolute' },
+        style: { ...textNode.style, objectFit: 'cover', position: 'absolute' },
       } as unknown as TextNode
       const { container } = render(
         <DslRenderer node={nodeWithBadStyle} selectedNodeId={null} onSelect={noop} />
       )
       const p = container.querySelector('p')!
       expect(p.style.color).toBe('blue')
-      expect(p.style.display).toBe('')
+      expect(p.style.objectFit).toBe('')
       expect(p.style.position).toBe('')
     })
   })

@@ -198,7 +198,7 @@ def test_style_dict_inside_props_is_rejected():
 def test_whitelist_has_no_relaxation_switch():
     """S-1 / DD-21：白名单没有任何配置项 / 环境变量 / 请求字段可以放宽。"""
     assert Style.model_config["extra"] == "forbid"
-    assert len(Style.model_fields) == 11
+    assert len(Style.model_fields) == 31
     # 请求契约里不存在任何「放宽 style 校验」的入口字段
     from genui_api.api.schemas import RefineRequest
 

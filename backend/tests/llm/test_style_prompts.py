@@ -67,10 +67,10 @@ def _context(
 # ============================================================
 
 
-def test_system_prompt_lists_all_eleven_style_fields():
-    """11 字段白名单必须逐字出现在 SP 中——事实来源是 Style 模型，不是硬编码列表。"""
+def test_system_prompt_lists_all_style_fields():
+    """31 字段白名单必须逐字出现在 SP 中——事实来源是 Style 模型，不是硬编码列表。"""
     sp = build_refinement_system_prompt()
-    assert len(_STYLE_FIELDS) == 11
+    assert len(_STYLE_FIELDS) == 31
     for name in _STYLE_FIELDS:
         assert name in sp, name
 

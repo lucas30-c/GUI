@@ -4,9 +4,10 @@ import type { Locator, Page } from '@playwright/test';
 /**
  * M4-04 受控样式精修 E2E（Spec 010 AC-31 / AC-17）。
  *
- * 前后端由 playwright.config.ts 的 webServer 数组统一启动：
- * FastAPI（MockProvider / MockGenerationProvider 为默认 Provider）与 Vite dev server。
- * MockProvider 的 `set_style:` / `set_text_style:` 前缀（AP-7）提供**确定性** style 证据链，
+ * 前后端由 playwright.config.ts 的 webServer 数组统一启动（干净进程）：
+ * 确定性轨道 —— FastAPI 经 tests/e2e_app.py 注入测试替身（仅测试范围）与
+ * Vite dev server（5173 → 8000）。
+ * 测试替身的 `set_style:` / `set_text_style:` 前缀（AP-7）提供**确定性** style 证据链，
  * 因此本 spec 是 CI 每次收口都必跑的 deterministic evidence，与 opt-in 真实模型 smoke 互补。
  *
  * 断言的性质：style 修改逐轮累积生效、未提及的 style 键保持不变、

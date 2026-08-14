@@ -5,7 +5,7 @@ import asyncio
 import pytest
 
 from genui_api.provider.base import RefinementContext, RefinementProvider
-from genui_api.provider.mock import MockProvider
+from tests.doubles.refinement import MockProvider
 
 
 def _run(coro):

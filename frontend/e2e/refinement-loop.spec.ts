@@ -3,8 +3,9 @@ import { test, expect } from '@playwright/test';
 /**
  * M3-02 局部精修闭环 E2E（Spec 006「E2E 场景：连续两轮精修」12 步）。
  *
- * 步骤 1 / 2 由 playwright.config.ts 的 webServer 数组完成：
- * 统一启动 FastAPI（MockProvider 为默认 Provider）与 Vite dev server。
+ * 步骤 1 / 2 由 playwright.config.ts 的 webServer 数组完成（干净进程）：
+ * 确定性轨道 —— FastAPI 经 tests/e2e_app.py 注入测试替身（仅测试范围）与
+ * Vite dev server（5173 → 8000）。
  */
 
 const GOLD_SUBTITLE = '每一杯都是匠心之作，从产地到杯中的精品咖啡体验';

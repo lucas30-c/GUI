@@ -3,13 +3,15 @@ import { test, expect } from '@playwright/test';
 /**
  * M4-01 一句话生成初稿 → 选择节点 → 局部精修 全链路 E2E（Spec 007 AC-68 ~ AC-72）。
  *
- * 前后端由 playwright.config.ts 的 webServer 数组统一启动：
- * FastAPI（MockGenerationProvider + MockProvider 均为默认 Provider）与 Vite dev server。
+ * 前后端由 playwright.config.ts 的 webServer 数组统一启动（干净进程）：
+ * 确定性轨道 —— FastAPI 经 tests/e2e_app.py 注入测试替身（MockGenerationProvider
+ * + MockProvider，仅测试范围）与 Vite dev server（5173 → 8000）。
+ * 真实模型浏览器验收由 e2e/complex-generation.spec.ts（轨道 B，5174 → 8002）承担。
  */
 
 const GOLD_TITLE = 'Brew & Bean';
 
-/** 咖啡店初稿模板文案（backend/src/genui_api/generation/templates.py） */
+/** 咖啡店初稿模板文案（backend/tests/doubles/templates.py） */
 const DRAFT_TITLE = '晨光咖啡工坊';
 const DRAFT_SUBTITLE = '清晨现烘的豆子，配一杯慢下来的时间';
 const DRAFT_CTA = '预订座位';
@@ -71,18 +73,21 @@ test('一句话生成初稿后可继续局部精修：文案更新且见证节�
   );
 });
 
-test('无法识别的需求返回安全失败：错误面板可见且页面保持原文档', async ({ page }) => {
+test('「意图无法识别」分支已移除：任意需求都得到合法初稿（确定性替身回退模板）', async ({
+  page,
+}) => {
   await page.goto('/');
-  const title = page.locator('[data-node-id="hero.title"]');
-  await expect(title).toHaveText(GOLD_TITLE);
 
   await page.getByTestId('generate-prompt').fill('随便来点什么');
   await page.getByTestId('generate-submit').click();
   await expect(page.getByTestId('generate-loading')).toHaveCount(0);
 
-  // 后端返回 422 unrecognized_intent，前端展示净化后的错误
-  await expect(page.getByTestId('generate-error-code')).toHaveText('unrecognized_intent');
-  await expect(page.getByTestId('generate-error-kind')).toHaveText('服务端错误');
-  // 页面仍渲染原文档
-  await expect(title).toHaveText(GOLD_TITLE);
+  // Real-Provider-only：产品不存在 unrecognized_intent 安全失败分支；
+  // 确定性替身对无关键词 prompt 回退到默认模板，仍是合法可渲染文档。
+  await expect(page.getByTestId('generate-error')).toHaveCount(0);
+  const canvasNodes = page.locator('.workbench-canvas [data-node-id]');
+  await expect(canvasNodes.first()).toBeVisible();
+  expect(await canvasNodes.count()).toBeGreaterThanOrEqual(5);
+  // 回退模板（产品介绍）的首屏标题出现
+  await expect(page.locator('[data-node-id="hero.title"]')).toHaveText('Latchwork 协作台');
 });

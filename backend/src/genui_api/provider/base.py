@@ -19,8 +19,8 @@ MAX_HISTORY_CHARS = 50_000
 # 单轮 patchProps 的键数上界。
 MAX_TURN_PROPS_KEYS = 16
 # 单轮 patchStyle 的键数上界（Spec 010 DD-22）：等于 DSL Style 白名单字段数，
-# 因为一轮最多能把 11 个受控字段各写一次，再多必然是未知键（已被契约层拒绝）。
-MAX_TURN_STYLE_KEYS = 11
+# 因为一轮最多能把 31 个受控字段各写一次，再多必然是未知键（已被契约层拒绝）。
+MAX_TURN_STYLE_KEYS = 31
 
 
 def history_char_size(turns: list[dict]) -> int:

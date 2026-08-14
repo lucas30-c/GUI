@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { CSSProperties, FormEvent, KeyboardEvent, MouseEvent } from 'react';
 import type { DslNode } from './types';
 import { mapDslStyle } from './style';
@@ -6,6 +7,45 @@ interface DslRendererProps {
   node: DslNode;
   selectedNodeId: string | null;
   onSelect: (nodeId: string) => void;
+}
+
+function DslImage({ commonProps, src, alt }: {
+  commonProps: Record<string, unknown>;
+  src: string;
+  alt: string;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  if (failed) {
+    return (
+      <div
+        {...commonProps}
+        role="img"
+        aria-label={alt}
+        style={{
+          ...(commonProps.style as CSSProperties),
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#f3f4f6',
+          color: '#9ca3af',
+          fontSize: '14px',
+          minHeight: '120px',
+        }}
+      >
+        <span>{alt || '图片加载失败'}</span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      {...commonProps}
+      src={src}
+      alt={alt}
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 export function DslRenderer({ node, selectedNodeId, onSelect }: DslRendererProps) {
@@ -89,7 +129,7 @@ export function DslRenderer({ node, selectedNodeId, onSelect }: DslRendererProps
       );
 
     case 'Image':
-      return <img {...commonProps} src={node.props.src} alt={node.props.alt} />;
+      return <DslImage commonProps={commonProps} src={node.props.src} alt={node.props.alt} />;
 
     case 'Card':
       return (

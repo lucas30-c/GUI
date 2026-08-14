@@ -46,7 +46,7 @@
 | **Model Provider** | 模型能力的统一接口：输入结构化意图与上下文，输出 Candidate Output。不负责裁决，只负责"翻译"。 |
 | **RefinementProvider** | Model Provider 的精修专用 Protocol（`typing.Protocol`）。定义 `async def generate_patch(context: RefinementContext) -> dict`，返回候选 Patch dict。 |
 | **RefinementContext** | 传递给 RefinementProvider 的受控上下文数据类。包含 instruction、selected_node_id、selected_node_type、selected_node_props（深拷贝）、selected_node_style（深拷贝，由 Pipeline 从已校验文档派生）、document_version、conversation_history。不含完整文档（最小权限原则）。 |
-| **Mock Provider** | Model Provider 的确定性实现：用规则/预置响应模拟模型行为，与真实模型同接口，保证无外部依赖的演示路径。 |
+| **测试替身（Test Doubles）** | Model Provider 的确定性实现（`backend/tests/doubles/`）：用规则/预置响应模拟模型行为，与真实模型同接口。Real-Provider-only 架构下仅存在于测试范围，经 `create_app` 显式注入；生产链路恒为真实模型。 |
 | **Refinement Pipeline** | 无状态异步编排函数 `refine()`，10 步确定性流程：校验指令 → 校验源文档 → 查找节点 → 构造上下文 → 调用 Provider → 校验候选结构 → 边界检查 → 应用 Patch → 完整性验证 → 返回结果。 |
 | **Trace** | 一轮对话的完整记录：输入、候选输出、各环节校验结果、应用结果、指标数据点。用于排错、指标计算与模板沉淀。 |
 

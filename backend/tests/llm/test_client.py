@@ -12,7 +12,6 @@ from openai import AsyncOpenAI
 from genui_api.llm.client import (
     DEFAULT_MAX_RETRIES,
     DEFAULT_TIMEOUT,
-    PROVIDER_MOCK,
     PROVIDER_OPENAI_COMPATIBLE,
     PROVIDER_RESPONSE_ERROR_MESSAGE,
     ModelConfig,
@@ -82,11 +81,14 @@ def test_create_openai_client_passes_parameters_through():
 
 
 def test_create_openai_client_defaults_are_fail_fast():
-    """默认 timeout=30s、max_retries=0：fail fast 是真实行为而非纸面承诺（DD-13）。"""
+    """默认 timeout=120s、max_retries=0：fail fast 是真实行为而非纸面承诺（DD-13）。
+    
+    P0 修复：timeout 从 30s 增加到 120s 以支持复杂页面生成（bounded retry 最多 2 次）。
+    """
     client = create_openai_client(
         api_key=PLACEHOLDER_KEY, base_url=PLACEHOLDER_BASE_URL
     )
-    assert client.timeout == DEFAULT_TIMEOUT == 30.0
+    assert client.timeout == DEFAULT_TIMEOUT == 120.0
     assert client.max_retries == DEFAULT_MAX_RETRIES == 0
 
 
@@ -102,33 +104,34 @@ def test_create_openai_client_does_not_read_environment(monkeypatch):
 
 
 # ============================================================
-# load_model_config — mock 默认态（AC-06）
+# load_model_config — Real-Provider-only（mock 不再是运行时模式）
 # ============================================================
 
 
-def test_load_model_config_defaults_to_mock():
-    config = load_model_config()
-    assert config == ModelConfig(provider=PROVIDER_MOCK)
-    assert config.api_key is None
-    assert config.base_url is None
-    assert config.generation_model is None
-    assert config.refinement_model is None
+def test_load_model_config_rejects_unset_provider(monkeypatch):
+    """未设置 GENUI_MODEL_PROVIDER → ProviderConfigError（绝不默认 mock）。"""
+    monkeypatch.delenv("GENUI_MODEL_PROVIDER", raising=False)
+    with pytest.raises(ProviderConfigError) as exc:
+        load_model_config()
+    assert "GENUI_MODEL_PROVIDER" in str(exc.value)
 
 
 @pytest.mark.parametrize("raw", ["", "   ", "mock", "  MOCK  ", "Mock"])
-def test_load_model_config_mock_variants(monkeypatch, raw):
+def test_load_model_config_rejects_mock_variants(monkeypatch, raw):
+    """mock / 空值都被拒绝：mock 只是测试替身，不是运行时模式。"""
     monkeypatch.setenv("GENUI_MODEL_PROVIDER", raw)
-    assert load_model_config().provider == PROVIDER_MOCK
+    with pytest.raises(ProviderConfigError):
+        load_model_config()
 
 
-def test_load_model_config_mock_ignores_credentials(monkeypatch):
-    """mock 模式不读取凭证：即使设置了 Key 也不进入配置快照。"""
+def test_load_model_config_rejection_is_not_credential_dependent(monkeypatch):
+    """即使凭证齐全，mock 值依然被拒绝——模式判定先于凭证读取。"""
     monkeypatch.setenv("GENUI_MODEL_PROVIDER", "mock")
     monkeypatch.setenv("GENUI_LLM_API_KEY", PLACEHOLDER_KEY)
     monkeypatch.setenv("GENUI_LLM_BASE_URL", PLACEHOLDER_BASE_URL)
-    config = load_model_config()
-    assert config.api_key is None
-    assert config.base_url is None
+    monkeypatch.setenv("GENUI_GENERATION_MODEL", "placeholder-generation-model")
+    with pytest.raises(ProviderConfigError):
+        load_model_config()
 
 
 # ============================================================
@@ -209,7 +212,6 @@ def test_unknown_provider_raises_with_allowed_values(monkeypatch):
         load_model_config()
     message = str(exc.value)
     assert "GENUI_MODEL_PROVIDER" in message
-    assert PROVIDER_MOCK in message
     assert PROVIDER_OPENAI_COMPATIBLE in message
 
 
@@ -238,10 +240,10 @@ def test_create_async_client_from_config():
     assert str(client.base_url).rstrip("/") == PLACEHOLDER_BASE_URL.rstrip("/")
 
 
-def test_create_async_client_rejects_mock_mode():
-    """mock 模式下被误调用时拒绝构造 SDK 客户端。"""
+def test_create_async_client_rejects_non_openai_compat_mode():
+    """provider 非 openai_compatible 时被误调用 → 拒绝构造 SDK 客户端。"""
     with pytest.raises(ProviderConfigError):
-        create_async_client(ModelConfig(provider=PROVIDER_MOCK))
+        create_async_client(ModelConfig(provider="mock"))
 
 
 def test_create_async_client_without_config_reads_env(monkeypatch):
@@ -250,8 +252,9 @@ def test_create_async_client_without_config_reads_env(monkeypatch):
     assert isinstance(client, AsyncOpenAI)
 
 
-def test_create_async_client_default_mode_rejected():
-    """默认（mock）环境下不带 config 调用 → 拒绝，绝不静默连真实端点。"""
+def test_create_async_client_default_mode_rejected(monkeypatch):
+    """配置不完整时不带 config 调用 → 拒绝，绝不静默连真实端点。"""
+    monkeypatch.delenv("GENUI_LLM_API_KEY", raising=False)
     with pytest.raises(ProviderConfigError):
         create_async_client()
 

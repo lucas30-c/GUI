@@ -1,4 +1,8 @@
-"""Generate API 端点集成测试 — 正向/反向、Content-Type、脱敏、OpenAPI、Provider 注入"""
+"""Generate API 端点集成测试 — 正向/反向、Content-Type、脱敏、OpenAPI、Provider 注入
+
+Real-Provider-only：生产链路不再有 Mock 默认值。本文件的 `client` 夹具通过
+create_app 显式注入测试替身（tests/doubles），与生产装配路径完全一致。
+"""
 
 import json
 from pathlib import Path
@@ -8,10 +12,11 @@ from fastapi.testclient import TestClient
 
 from genui_api.api.routes import get_generation_provider
 from genui_api.api.schemas import GenerateRequest
-from genui_api.generation.base import UnrecognizedIntentError
-from genui_api.generation.mock import MockGenerationProvider
 from genui_api.generation.pipeline import MAX_PROMPT_LENGTH
+from genui_api.llm.client import ProviderConfigError
 from genui_api.main import create_app
+from tests.doubles.generation import MockGenerationProvider
+from tests.doubles.refinement import MockProvider
 
 
 # ============================================================
@@ -21,7 +26,13 @@ from genui_api.main import create_app
 
 @pytest.fixture
 def client():
-    return TestClient(create_app())
+    # 显式注入测试替身（Real-Provider-only：未注入时 create_app 要求真实配置）
+    return TestClient(
+        create_app(
+            refinement_provider=MockProvider(),
+            generation_provider=MockGenerationProvider(),
+        )
+    )
 
 
 def _post_generate(client: TestClient, payload, content_type="application/json"):
@@ -117,11 +128,6 @@ class CrashingProvider:
         )
 
 
-class AlwaysUnrecognizedProvider:
-    async def generate_draft(self, prompt: str) -> dict:
-        raise UnrecognizedIntentError("nope")
-
-
 class EchoPromptProvider:
     """把 prompt 原文塞进候选文档的非法字段，用于验证响应不回显 prompt。"""
 
@@ -171,9 +177,16 @@ def test_product_prompt_returns_product_draft(client):
     assert len(cards) >= 2
 
 
-def test_success_envelope_has_no_patch_or_integrity(client):
+def test_success_envelope_has_document_and_meta_only(client):
     body = _post_generate(client, {"prompt": "咖啡店"}).json()
-    assert set(body.keys()) == {"success", "document"}
+    # 成功 envelope：document + 过程元数据；无 patch / integrity（生成侧语义）
+    assert set(body.keys()) == {"success", "document", "meta"}
+    meta = body["meta"]
+    assert meta["attempts"] == 1
+    assert meta["repairUsed"] is False
+    assert isinstance(meta["normalization"], list)
+    assert meta["requestId"]
+    assert "durationMs" in meta
 
 
 def test_generated_coffee_title_differs_from_gold_case(client, gold_case_json):
@@ -277,13 +290,14 @@ def test_prompt_at_exact_limit_is_accepted(client):
     assert resp.status_code == 200
 
 
-def test_unrecognized_prompt_returns_422_unrecognized_intent(client):
+def test_unmatched_prompt_no_longer_returns_unrecognized_intent(client):
+    """「意图无法识别」已从产品移除：无关键词命中走确定性回退，仍是合法文档。"""
     resp = _post_generate(client, {"prompt": "随便来点什么"})
-    assert resp.status_code == 422
+    assert resp.status_code == 200
     body = resp.json()
-    assert body["success"] is False
-    assert body["error"]["code"] == "unrecognized_intent"
-    assert "document" not in body
+    assert body["success"] is True
+    assert body["document"]["root"]["type"] == "Page"
+    assert "error" not in body
 
 
 # ============================================================
@@ -292,21 +306,27 @@ def test_unrecognized_prompt_returns_422_unrecognized_intent(client):
 
 
 def test_non_dict_candidate_returns_502(client):
-    app = create_app(generation_provider=NonDictProvider())
+    app = create_app(
+        refinement_provider=MockProvider(), generation_provider=NonDictProvider()
+    )
     resp = _post_generate(TestClient(app), {"prompt": "咖啡店"})
     assert resp.status_code == 502
     assert resp.json()["error"]["code"] == "invalid_generated_document"
 
 
 def test_none_candidate_returns_502(client):
-    app = create_app(generation_provider=NoneProvider())
+    app = create_app(
+        refinement_provider=MockProvider(), generation_provider=NoneProvider()
+    )
     resp = _post_generate(TestClient(app), {"prompt": "咖啡店"})
     assert resp.status_code == 502
     assert resp.json()["error"]["code"] == "invalid_generated_document"
 
 
 def test_duplicate_id_candidate_returns_502_without_document_content():
-    app = create_app(generation_provider=DuplicateIdProvider())
+    app = create_app(
+        refinement_provider=MockProvider(), generation_provider=DuplicateIdProvider()
+    )
     resp = _post_generate(TestClient(app), {"prompt": "咖啡店"})
     assert resp.status_code == 502
     body = resp.json()
@@ -318,7 +338,9 @@ def test_duplicate_id_candidate_returns_502_without_document_content():
 
 
 def test_illegal_nesting_candidate_returns_502_without_document_content():
-    app = create_app(generation_provider=IllegalNestingProvider())
+    app = create_app(
+        refinement_provider=MockProvider(), generation_provider=IllegalNestingProvider()
+    )
     resp = _post_generate(TestClient(app), {"prompt": "咖啡店"})
     assert resp.status_code == 502
     body = resp.json()
@@ -329,7 +351,9 @@ def test_illegal_nesting_candidate_returns_502_without_document_content():
 
 
 def test_crashing_provider_returns_502_provider_error_sanitized():
-    app = create_app(generation_provider=CrashingProvider())
+    app = create_app(
+        refinement_provider=MockProvider(), generation_provider=CrashingProvider()
+    )
     resp = _post_generate(TestClient(app), {"prompt": "咖啡店"})
     assert resp.status_code == 502
     body = resp.json()
@@ -338,15 +362,25 @@ def test_crashing_provider_returns_502_provider_error_sanitized():
         assert leak not in resp.text
 
 
-def test_injected_unrecognized_provider_returns_422():
-    app = create_app(generation_provider=AlwaysUnrecognizedProvider())
+def test_injected_provider_exception_maps_to_provider_error():
+    """注入的 Provider 抛任何异常 → 502 provider_error（不再有 422 意图分支）。"""
+
+    class RaisingProvider:
+        async def generate_draft(self, prompt: str) -> dict:
+            raise RuntimeError("boom")
+
+    app = create_app(
+        refinement_provider=MockProvider(), generation_provider=RaisingProvider()
+    )
     resp = _post_generate(TestClient(app), {"prompt": "咖啡店落地页"})
-    assert resp.status_code == 422
-    assert resp.json()["error"]["code"] == "unrecognized_intent"
+    assert resp.status_code == 502
+    assert resp.json()["error"]["code"] == "provider_error"
 
 
 def test_error_response_never_echoes_prompt_text():
-    app = create_app(generation_provider=EchoPromptProvider())
+    app = create_app(
+        refinement_provider=MockProvider(), generation_provider=EchoPromptProvider()
+    )
     marker = "咖啡店 PROMPT_ECHO_MARKER"
     resp = _post_generate(TestClient(app), {"prompt": marker})
     assert resp.status_code == 502
@@ -362,14 +396,31 @@ def test_error_responses_have_no_traceback_or_env_leak(client):
 
 
 def test_dependency_override_is_used_for_generation_provider():
-    app = create_app(generation_provider=NonDictProvider())
+    app = create_app(
+        refinement_provider=MockProvider(), generation_provider=NonDictProvider()
+    )
     assert get_generation_provider in app.dependency_overrides
     override = app.dependency_overrides[get_generation_provider]
     assert isinstance(override(), NonDictProvider)
 
 
-def test_default_provider_is_mock_generation_provider():
-    assert isinstance(get_generation_provider(), MockGenerationProvider)
+def test_default_provider_requires_real_config(monkeypatch):
+    """Real-Provider-only：无真实配置时工厂 fail fast，绝不回退 Mock。"""
+    monkeypatch.delenv("GENUI_MODEL_PROVIDER", raising=False)
+    with pytest.raises(ProviderConfigError):
+        get_generation_provider()
+
+
+def test_default_provider_is_real_when_configured(monkeypatch):
+    from genui_api.generation.openai_compat_provider import (
+        OpenAICompatGenerationProvider,
+    )
+
+    monkeypatch.setenv("GENUI_MODEL_PROVIDER", "openai_compatible")
+    monkeypatch.setenv("GENUI_LLM_API_KEY", "<API_KEY>")
+    monkeypatch.setenv("GENUI_LLM_BASE_URL", "https://example.invalid/v1")
+    monkeypatch.setenv("GENUI_GENERATION_MODEL", "test-model")
+    assert isinstance(get_generation_provider(), OpenAICompatGenerationProvider)
 
 
 # ============================================================
@@ -431,8 +482,10 @@ def test_health_endpoint_still_works(client):
 
 
 def test_generate_and_refine_providers_are_independent():
-    """只注入生成侧恶意 Provider 时，精修端点行为不受影响。"""
-    app = create_app(generation_provider=NonDictProvider())
+    """生成侧与精修侧 Provider 解耦：注入生成侧恶意 Provider 不影响精修端点。"""
+    app = create_app(
+        refinement_provider=MockProvider(), generation_provider=NonDictProvider()
+    )
     client = TestClient(app)
     document = {
         "version": "0.1",

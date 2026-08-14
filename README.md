@@ -84,14 +84,14 @@ source .venv/bin/activate
 uvicorn genui_api.main:app --reload
 ```
 
-### 模型配置（Mock / 真实模型）
+### 模型配置（Real-Provider-only）
 
-系统同时支持**确定性 Mock**与**真实模型**两条 Provider 实现，两者满足同一个 Provider Protocol，走**同一条校验管线**：
+生产链路**只支持真实模型**（Owner 决策）：`GENUI_MODEL_PROVIDER=openai_compatible` 是唯一合法运行时模式。未设置或设置为 `mock` 都会在启动阶段 fail fast——**Mock 不再是运行时模式**，它只作为测试替身存在于 `backend/tests/doubles/`，经 `create_app` 显式注入，不出现在任何生产导入图中。
 
 | GENUI_MODEL_PROVIDER | 行为 |
 |---|---|
-| 未设置 / `mock`（默认） | Mock Provider：完全离线、确定性、无凭证、无网络请求 |
-| `openai_compatible` | 真实模型：通过 OpenAI 兼容的 Chat Completions 协议调用 |
+| `openai_compatible` | 真实模型：通过 OpenAI 兼容的 Chat Completions 协议调用（唯一合法值） |
+| 未设置 / `mock` / 其他 | 启动即失败（fail fast），不回退任何替身 |
 
 > `openai_compatible` 描述的是**传输协议**，不是厂商。Qwen / 阿里云百炼、Kimi、DeepSeek、GLM 都通过该协议接入，因此环境变量全部使用 provider-neutral 命名（`GENUI_LLM_*`），不出现任何厂商前缀。
 
@@ -127,9 +127,10 @@ env GENUI_MODEL_PROVIDER=openai_compatible GENUI_LLM_API_KEY=<API_KEY> \
 GENUI_RUN_REAL_LLM=1 pytest tests/llm/test_real_smoke.py -v              # 单轮生成 + 精修
 GENUI_RUN_REAL_LLM=1 pytest tests/llm/test_real_multi_turn_smoke.py -v   # 多轮 props relative follow-up
 GENUI_RUN_REAL_LLM=1 pytest tests/llm/test_real_style_smoke.py -v        # 多轮 style relative follow-up
+GENUI_RUN_REAL_LLM=1 pytest tests/llm/test_real_generation_matrix.py -v  # 复杂页面生成矩阵（5 组 Prompt + 摄影师 ×5，含 repair/规范化统计）
 ```
 
-裸 `pytest` 恒为零真实网络调用：即使 shell 中已存在真实凭证，测试夹具也会剥离模型环境变量并跳过所有 `real_llm` 用例。
+裸 `pytest` 恒为零真实网络调用：即使 shell 中已存在真实凭证，测试夹具也会把模型环境变量改写为不可达的离线占位值并跳过所有 `real_llm` 用例。
 
 ### API 端点
 
@@ -137,8 +138,8 @@ GENUI_RUN_REAL_LLM=1 pytest tests/llm/test_real_style_smoke.py -v        # 多�
 |------|------|------|
 | GET | /health | 健康检查 |
 | POST | /api/v1/dsl/validate | DSL 文档校验 |
-| POST | /api/v1/dsl/generate | 一句话生成初稿（Mock 或真实模型，由 GENUI_MODEL_PROVIDER 决定） |
-| POST | /api/v1/dsl/refine | 局部精修（Mock 或真实模型，由 GENUI_MODEL_PROVIDER 决定） |
+| POST | /api/v1/dsl/generate | 一句话生成初稿（真实模型；结构化输出 + 无损规范化 + 至多一次精准 repair） |
+| POST | /api/v1/dsl/refine | 局部精修（真实模型） |
 
 ### Patch v0.1 最小示例
 

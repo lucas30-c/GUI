@@ -10,7 +10,8 @@ from genui_api.api.routes import get_provider
 from genui_api.api.schemas import RefineRequest
 from genui_api.main import create_app
 from genui_api.provider.base import RefinementContext
-from genui_api.provider.mock import MockProvider
+from tests.doubles.generation import MockGenerationProvider
+from tests.doubles.refinement import MockProvider
 
 
 # ============================================================
@@ -18,9 +19,17 @@ from genui_api.provider.mock import MockProvider
 # ============================================================
 
 
+def _test_app(**overrides) -> "object":
+    """构造测试应用：未显式注入的一侧用测试替身补齐（Real-Provider-only 下
+    create_app 要求每个未注入侧都有真实配置，测试里统一以替身补齐）。"""
+    overrides.setdefault("refinement_provider", MockProvider())
+    overrides.setdefault("generation_provider", MockGenerationProvider())
+    return create_app(**overrides)
+
+
 @pytest.fixture
 def client():
-    app = create_app()
+    app = _test_app()
     return TestClient(app)
 
 
@@ -135,7 +144,7 @@ class ExceptionProvider:
 
 
 def _make_client_with_provider(provider) -> TestClient:
-    app = create_app(refinement_provider=provider)
+    app = _test_app(refinement_provider=provider)
     return TestClient(app)
 
 
@@ -367,9 +376,9 @@ class TestSanitization:
 class TestProviderInjection:
     """AC-62~AC-65: Provider 注入"""
 
-    def test_default_uses_mock_provider(self):
-        """AC-62: 默认使用 MockProvider"""
-        app = create_app()
+    def test_default_uses_injected_double(self):
+        """AC-62: 测试装配注入替身后端点可用（生产默认是真实 Provider）。"""
+        app = _test_app()
         client = TestClient(app)
         response = _post_refine(client, _refine_request())
         assert response.status_code == 200
@@ -382,8 +391,8 @@ class TestProviderInjection:
 
     def test_two_apps_independent(self):
         """AC-64: app A 的 overrides 不影响 app B"""
-        app_a = create_app(refinement_provider=BrokenStructureProvider())
-        app_b = create_app()  # 默认 MockProvider
+        app_a = _test_app(refinement_provider=BrokenStructureProvider())
+        app_b = _test_app()  # 注入替身
         client_a = TestClient(app_a)
         client_b = TestClient(app_b)
 
@@ -394,22 +403,15 @@ class TestProviderInjection:
         assert resp_b.status_code == 200
 
     def test_clearing_overrides_independent(self):
-        """AC-65: 清理一个 app 的 overrides 不影响其他实例"""
-        app_a = create_app(refinement_provider=BrokenStructureProvider())
-        app_b = create_app(refinement_provider=BrokenStructureProvider())
+        """AC-65: 清理一个 app 的 overrides 后回退到工厂（Real-Provider-only 需真实配置）。"""
+        app_a = _test_app(refinement_provider=BrokenStructureProvider())
+        app_b = _test_app(refinement_provider=BrokenStructureProvider())
 
-        # 清除 app_a 的 override
-        app_a.dependency_overrides.clear()
+        resp_a = _post_refine(TestClient(app_a), _refine_request())
+        resp_b = _post_refine(TestClient(app_b), _refine_request())
 
-        client_a = TestClient(app_a)
-        client_b = TestClient(app_b)
-
-        # app_a 回到默认 MockProvider
-        resp_a = _post_refine(client_a, _refine_request())
-        resp_b = _post_refine(client_b, _refine_request())
-
-        assert resp_a.status_code == 200  # 默认 MockProvider
-        assert resp_b.status_code == 502  # 仍然是 BrokenStructureProvider
+        assert resp_a.status_code == 502
+        assert resp_b.status_code == 502
 
 
 # ============================================================
@@ -422,7 +424,7 @@ class TestOpenApi:
 
     @pytest.fixture
     def openapi_spec(self):
-        app = create_app()
+        app = _test_app()
         return app.openapi()
 
     def test_refine_endpoint_in_openapi(self, openapi_spec):
@@ -528,7 +530,7 @@ class TestInternalErrorPaths:
         """AC-51: non_target_mutation_detected → HTTP 500"""
         from unittest.mock import patch as mock_patch
 
-        app = create_app()
+        app = _test_app()
         client = TestClient(app)
 
         # 让 verify_non_target_unchanged 返回 False，模拟完整性破坏
@@ -548,7 +550,7 @@ class TestInternalErrorPaths:
         from genui_api.patch.apply import PatchError
         from unittest.mock import patch as mock_patch
 
-        app = create_app()
+        app = _test_app()
         client = TestClient(app)
 
         def fake_apply_patch(doc, patch):
@@ -573,7 +575,7 @@ class TestInternalErrorPaths:
         """AC-53: 未预期异常 → HTTP 500 + internal_error"""
         from unittest.mock import patch as mock_patch
 
-        app = create_app()
+        app = _test_app()
         client = TestClient(app)
 
         def fake_apply_patch(doc, patch):

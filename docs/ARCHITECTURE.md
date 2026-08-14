@@ -11,7 +11,7 @@ Browser (React SPA)
    │  HTTP/JSON
    ▼
 Backend (FastAPI)
-   ├── Model Provider 接口（Mock Provider / 真实模型，同接口可替换）
+   ├── Model Provider 接口（Real-Provider-only：生产恒为真实模型；测试替身仅测试范围注入）
    ├── DSL 校验与 Patch 应用引擎（确定性代码）
    ├── 模板推荐与自进化模块（规则 / 简单聚类 / embedding 检索）
    └── 本地 JSON 存储（页面状态、Trace、模板库、模拟历史对话）
@@ -119,13 +119,13 @@ M4-04 完成。`update_props` 与 `update_style` 两类操作均已闭环，并�
 
 ### 职责
 
-定义 RefinementProvider Protocol 和具体实现（当前为 MockProvider）。Provider 接收 RefinementContext（选中节点信息 + 指令），返回候选 Patch dict（不可信，需校验）。
+定义 RefinementProvider Protocol 和具体实现（生产为 OpenAICompatRefinementProvider；MockProvider 已移至测试范围 `backend/tests/doubles/`）。Provider 接收 RefinementContext（选中节点信息 + 指令），返回候选 Patch dict（不可信，需校验）。
 
 ### 关键设计
 
 - **Protocol 定义**：使用 `typing.Protocol`，任何具有匹配签名的类自动满足接口。
 - **最小权限**：RefinementContext 仅暴露选中节点相关信息，不传递完整文档。
-- **MockProvider**：确定性映射，无网络、无随机、无密钥。根据 `selected_node_type` 选择合法文案字段；另识别 `set_style:` / `set_text_style:` 前缀以产出 `update_style` 与混合候选（M4-04）。
+- **测试替身**：`tests/doubles/refinement.py` 的确定性映射（无网络、无随机、无密钥）根据 `selected_node_type` 选择合法文案字段，并识别 `set_style:` / `set_text_style:` 前缀产出 `update_style` 与混合候选——仅供测试注入，不在生产导入图中。
 - **依赖注入**：通过 FastAPI Depends + `create_app(refinement_provider)` 注入，可测试。
 - **零业务依赖的叶子模块（M4-03）**：`provider/base.py` 不 import 任何其他业务模块，因此同时承载 `ConfirmedTurn` 与四项上下文上界常量的**唯一事实来源**，供 `api/` 与 `refinement/` 单向依赖（详见 §19）。
 - **style 上下文（M4-04）**：`RefinementContext` 增加 `selected_node_style`，由 Pipeline 从**已校验文档**派生（`exclude_none`），不来自模型输出、不来自 history 回灌；`ConfirmedTurn` 增加 `patch_style`（详见 §19）。
@@ -157,16 +157,15 @@ M4-04 完成。`update_props` 与 `update_style` 两类操作均已闭环，并�
 
 ### 职责
 
-一句话需求 → 初稿 DSL Document 的最小生成链路：`base.py` 定义 GenerationProvider Protocol 与 UnrecognizedIntentError，`mock.py` 为确定性 Mock 实现，`templates.py` 存放三套独立内置初稿模板，`pipeline.py` 提供无状态异步编排函数 `generate_document()`。
+一句话需求 → 初稿 DSL Document 的生成链路（Real-Provider-only + 三层收敛）：`base.py` 定义 GenerationProvider Protocol（无意图分类分支），`openai_compat_provider.py` 为真实实现，`pipeline.py` 提供无状态异步编排函数 `generate_document()`。确定性初稿模板与 Mock Provider 已从生产树移至测试范围（`backend/tests/doubles/`），仅供测试注入。
 
 ### 关键设计
 
-- **Protocol 定义**：`async def generate_draft(self, prompt: str) -> dict`，与 RefinementProvider 同构，可替换为真实模型实现。
+- **Protocol 定义**：`async def generate_draft(self, prompt: str) -> dict`，与 RefinementProvider 同构。首次生成与 repair 重生成共用本方法。
 - **不可信候选**：Provider 输出一律视为不可信候选，必须经 `contracts/validation.py` 的 `validate_dsl_document()` 这一唯一校验入口，生成侧不复制任何校验规则。
-- **Pipeline 六步**：校验 prompt → 调用 Provider → 捕获 UnrecognizedIntentError → 捕获 Provider 异常 → 校验候选文档 → 返回结果。
-- **确定性 Mock 映射**：`strip()` + `lower()` 子串匹配，固定优先级 咖啡店 > 活动报名 > 产品介绍；无匹配抛出 UnrecognizedIntentError，不做静默兜底。
-- **模板隔离**：每次返回 `copy.deepcopy(模板常量)`，避免跨请求污染。
-- **错误分类**：`invalid_prompt` → 400、`unrecognized_intent` → 422、`invalid_generated_document` / `provider_error` → 502，由 API 层独立的 `_GENERATION_ERROR_HTTP_MAP` 映射，不影响精修侧映射表。
+- **三层收敛**：① 生成时约束——Provider 以 `DslDocument.model_json_schema()` 派生的完整 Schema 走 `json_schema` 结构化输出（端点拒绝时进程内降级 `json_object` 并记录）；② 确定性无损规范化——只做语义等价转换（trim / 枚举大小写 / CSS 数字字重→关键字），逐条记录、不删字段不截断；③ 精准 repair——首次校验失败最多触发 1 次 Real Provider repair，输入为机器可读的错误清单（路径 / 收到的值 / 允许字段与值域），repair 输出重走完整校验。
+- **无意图分类**：不存在 `unrecognized_intent` 分支；真实模型的失败就是失败，fail-closed 后由 API 层转换为用户可读的分层错误。
+- **错误分类**：`invalid_prompt` → 422、`invalid_generated_document` / `provider_error` → 502、`internal_error` → 500，由 API 层独立的 `_GENERATION_ERROR_HTTP_MAP` 映射，不影响精修侧映射表。失败 envelope 携带 `requestId` 供与后端日志串联。
 
 ## 4.6 LLM 模块 (LLM Module) — M4-02 新增
 
@@ -181,10 +180,10 @@ M4-04 完成。`update_props` 与 `update_style` 两类操作均已闭环，并�
 
 ### 关键设计
 
-- **传输协议而非厂商**：`GENUI_MODEL_PROVIDER = mock | openai_compatible`，`openai_compatible` 指 OpenAI 兼容的 Chat Completions 协议。Qwen / 百炼、Kimi、DeepSeek、GLM 均由该协议接入，因此环境变量全部 provider-neutral（`GENUI_LLM_API_KEY` / `GENUI_LLM_BASE_URL` / `GENUI_GENERATION_MODEL` / `GENUI_REFINEMENT_MODEL`），不出现厂商前缀。
+- **传输协议而非厂商**：`GENUI_MODEL_PROVIDER = openai_compatible`（Real-Provider-only，唯一合法值；未设置或设为 mock 在启动期 fail fast）。`openai_compatible` 指 OpenAI 兼容的 Chat Completions 协议。Qwen / 百炼、Kimi、DeepSeek、GLM 均由该协议接入，因此环境变量全部 provider-neutral（`GENUI_LLM_API_KEY` / `GENUI_LLM_BASE_URL` / `GENUI_GENERATION_MODEL` / `GENUI_REFINEMENT_MODEL`），不出现厂商前缀。
 - **单一配置读取点**：`llm/client.py` 是唯一读取模型环境变量的模块；Provider 只接收已构造好的 client，不接触凭证。无默认模型名——猜一个模型名比报错更难排查。
 - **条件式 fail fast**：`create_app()` 只校验**未被显式注入**的那一侧配置；两侧都注入时完全不读 LLM 环境变量（显式注入的 Provider 自带候选来源，此时要求凭证是伪依赖）。DI override 恒优先于环境变量。
-- **无重试**：`max_retries=0`、`timeout=30s`，不做自动重试、不做候选修复、不自动降级到 Mock。静默降级会让「真实模型接入」这个结论不可验证。
+- **无自动重试，但有一次受控 repair**：传输层 `max_retries=0`、`timeout=30s`，不做静默重试；生成侧在校验失败时最多触发 1 次机器可读的精准 repair（见 §4.5 三层收敛），且**绝不降级到 Mock / 模板匹配**。静默降级会让「真实模型接入」这个结论不可验证。
 - **SP/UP 物理分层**：见 §18。
 - **净化异常**：SDK 的网络/认证/限流异常一律转为固定文案的 `ProviderResponseError`，`from None` 切断 `__cause__`，避免 traceback 携带端点或凭证；日志只记 provider / kind / model / token 数。
 
@@ -208,7 +207,7 @@ React + TypeScript + Vite
 
 ### 当前状态
 
-M4-04 完成。已实现：后端集成（生成 + 精修）、模型接入（Mock / 真实模型由环境变量切换）、多轮对话上下文（含 `patchStyle`）、`update_props` 与 `update_style` 两类受控操作的结果展示。**尚未实现**：模板推荐、指标面板、Undo/Redo（属 PDF 任务二及之后）。
+M4-04 完成，且已完成 **Real-Provider-only 收口**：生产链路恒走真实模型（`openai_compatible`），Mock 从运行时模式降级为测试范围内的测试替身；生成侧引入三层收敛（结构化输出约束 → 无损规范化 → 至多一次精准 repair）与请求级 requestId 可观测性；错误响应分层（用户可读文案 + 请求编号，内部诊断默认折叠）。已实现：后端集成（生成 + 精修）、多轮对话上下文（含 `patchStyle`）、`update_props` 与 `update_style` 两类受控操作的结果展示。**尚未实现**：模板推荐、指标面板、Undo/Redo（属 PDF 任务二及之后）。
 
 ## 5. 共享契约 (Shared Contracts)
 
@@ -270,11 +269,11 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 ## 11. 模型 Provider 边界 (Model Provider Boundary)
 
 - 统一接口：`generate(candidateRequest) → candidateOutput`，输入为结构化的意图 + 上下文，输出为结构化候选（DSL 初稿或 Patch）。
-- **Mock Provider 与真实模型使用相同接口**，通过环境变量切换；Mock 用确定性规则/预置响应，保证演示路径永远可跑。
+- **测试替身与真实模型使用相同接口**（Real-Provider-only：生产恒为真实模型）；测试替身（`backend/tests/doubles/`）用确定性规则/预置响应，仅经显式注入，保证离线回归永远可跑。
 - Provider 只做"翻译"（自然语言 → 候选结构），不做"裁决"：输出一律视为不可信候选，必须走 §9 管线。
 - 模型不是系统状态的事实来源；它看不到也决定不了"什么是当前页面"，每轮所需的页面状态由系统注入。
 - Prompt 的 SP/UP 分层设计（哪些固定、哪些随轮次变化、缓存与成本影响）见 §18，M4-02 已实现并有正反向测试。
-- **实现状态（M4-02）**：两侧均已提供真实实现（`generation/openai_compat_provider.py`、`provider/openai_compat_provider.py`），由 `GENUI_MODEL_PROVIDER` 在 `mock` 与 `openai_compatible` 间切换；显式注入（`create_app(...)` → `dependency_overrides`）优先于环境变量，测试因此无需凭证。
+- **实现状态（M4-02 → Real-Provider-only 收口）**：两侧均已提供真实实现（`generation/openai_compat_provider.py`、`provider/openai_compat_provider.py`），生产链路只接受 `GENUI_MODEL_PROVIDER=openai_compatible`；显式注入（`create_app(...)` → `dependency_overrides`）优先于环境变量，测试因此无需凭证（替身位于 `backend/tests/doubles/`）。
 
 ## 12. 模板推荐边界 (Template Recommendation Boundary)
 
@@ -289,24 +288,24 @@ Patch 是模型候选修改的唯一载体。校验管线（全部确定性代�
 - 校验失败 ≠ 系统异常：它是预期路径，返回结构化拒绝原因（哪个环节、哪条规则）。
 - 对用户可理解的反馈：前端把拒绝原因翻译为"这次没改成，因为……"，而不是堆栈。
 - 状态一致性优先：任何失败都保证文档状态不变（先副本后提交）。
-- 模型调用失败：Mock 保底 + 明确错误提示；不得静默降级为整页重生成。
+- 模型调用失败：fail-closed + 用户可读的分层错误提示（含请求编号）；绝不降级到 Mock / 模板匹配，也不得静默降级为整页重生成。
 
 ## 14. 测试策略 (Testing Strategy)
 
-- **后端 pytest**：DSL Schema 校验、Patch 管线（正向/反向）、非目标完整性校验、Provider 边界（Mock）、模板机制（沉淀/推荐/更新）、API 端点。
-- **前端单元测试**：DSL 渲染、选中交互、Patch 后局部更新（不重绘整页）。
+- **后端 pytest**：DSL Schema 校验、Patch 管线（正向/反向）、非目标完整性校验、Provider 边界（测试替身）、Style 契约一致性（单一事实来源守护）、模板机制（沉淀/推荐/更新）、API 端点。
+- **前端单元测试**：DSL 渲染、选中交互、Patch 后局部更新（不重绘整页）、前端白名单与 JSON Schema 契约一致性。
 - **Gold Case**：固定输入 → 固定期望输出的端到端用例集（如咖啡店演示流），作为防漂移回归。
-- **Playwright E2E**：演示闭环的浏览器级回归。已覆盖生成闭环、精修闭环、多轮稳定性、style 精修（`update_style` 与混合候选）与 Golden Path（生成 → 选中 → 文案 → 颜色 → 尺寸 → 非目标零变更），统一走 MockProvider 以保证 CI 确定性。
-- **opt-in 真实模型 smoke**：单轮、多轮 props、多轮 style 三条 `real_llm` 用例，需 `GENUI_RUN_REAL_LLM=1` 且凭证齐备；缺凭证恒为 `skipped`，不得记为通过。
+- **Playwright E2E（双轨）**：确定性轨道（注入测试替身，5173 → 8000）覆盖生成闭环、精修闭环、多轮稳定性、style 精修与 Golden Path；真实模型轨道（生产 app + 真实凭证，5174 → 8002）覆盖连续两次复杂页面生成的浏览器验收与失败路径。全部从干净进程启动。
+- **opt-in 真实模型 smoke / 矩阵**：单轮、多轮 props、多轮 style 与复杂页面生成矩阵（5 组 Prompt + 摄影师 ×5，含 repair/规范化统计），需 `GENUI_RUN_REAL_LLM=1` 且凭证齐备；缺凭证恒为 `skipped`，不得记为通过。
 - 所有关键协议必须有正向 + 反向测试（AGENTS.md 约束 19）。
 
 ## 15. 安全边界 (Security Boundaries)
 
 - 模型输出是不可信输入：永远不能绕过 §9 管线。
-- Patch 白名单制：只允许修改「选中节点 + Schema 允许属性 + 11 项 style 白名单字段」，其余一律拒绝（默认拒绝，而非默认允许）。
+- Patch 白名单制：只允许修改「选中节点 + Schema 允许属性 + 31 项 style 白名单字段」，其余一律拒绝（默认拒绝，而非默认允许）。
 - 无任意代码执行：系统任何位置不 `eval`、不注入 HTML 脚本、不把模型输出当代码。
-- 密钥走环境变量，仓库只提交脱敏示例（`.env.example` 仅含占位符，`.env` 已被忽略）；Mock/真实模型由环境切换。错误响应与日志均不含 Key / base_url / prompt / 模型原始输出 / traceback。
-- 默认测试运行零真实网络调用：`real_llm` 用例需 `GENUI_RUN_REAL_LLM=1` 显式 opt-in，且测试夹具会剥离宿主 shell 的模型环境变量。
+- 密钥走环境变量，仓库只提交脱敏示例（`.env.example` 仅含占位符，`.env` 已被忽略）；生产链路 Real-Provider-only。错误响应与日志均不含 Key / base_url / prompt / 模型原始输出 / traceback。
+- 默认测试运行零真实网络调用：`real_llm` 用例需 `GENUI_RUN_REAL_LLM=1` 显式 opt-in，且测试夹具会把宿主 shell 的模型环境变量改写为不可达的离线占位值。
 - 本地原型不做多用户隔离；这是已声明的非目标，不是遗漏。
 
 ## 16. 建议的仓库结构 (Suggested Repository Structure)

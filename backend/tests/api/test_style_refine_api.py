@@ -29,7 +29,7 @@ from genui_api.main import create_app
 from genui_api.patch import PatchError, apply_patch
 from genui_api.provider import base as provider_base
 from genui_api.provider.base import RefinementContext, history_char_size
-from genui_api.provider.mock import MockProvider
+from tests.doubles.refinement import MockProvider
 
 # ============================================================
 # Fixtures & Helpers
@@ -294,7 +294,7 @@ def test_max_style_keys_is_accepted():
     provider = StubProvider()
     response = _post(_client(provider), _payload(history=[_turn(patchStyle=style)]))
     assert response.status_code == 200
-    assert len(provider.contexts[0].conversation_history[0].patch_style) == 11
+    assert len(provider.contexts[0].conversation_history[0].patch_style) == 31
 
 
 def test_unknown_turn_field_still_forbidden():
@@ -322,7 +322,7 @@ def test_twenty_turns_with_eleven_style_keys_still_accepted():
 
 
 def test_max_turn_style_keys_value_and_identity():
-    assert MAX_TURN_STYLE_KEYS == 11
+    assert MAX_TURN_STYLE_KEYS == 31
     assert api_schemas.MAX_TURN_STYLE_KEYS is provider_base.MAX_TURN_STYLE_KEYS
 
 

@@ -2,8 +2,27 @@
   "$defs": {
     "Style": {
       "additionalProperties": false,
-      "description": "受控样式模型，仅允许预定义的安全 CSS 属性",
+      "description": "受控 Style DSL v2 — Box Model + Layout + Typography + Border。\n\n31 个白名单字段，extra=forbid 拒绝一切未列出属性。\n每个字段使用其专属值域类型（CssLength / MarginAtom / MarginShorthand /\nPaddingShorthand / LineHeight / Color / 枚举），不再共用单一尺寸正则。\n字段的机器可读元数据由 contracts.style_registry 从本模型派生（单一事实来源）。",
       "properties": {
+        "alignItems": {
+          "anyOf": [
+            {
+              "enum": [
+                "flex-start",
+                "flex-end",
+                "center",
+                "stretch",
+                "baseline"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alignitems"
+        },
         "backgroundColor": {
           "anyOf": [
             {
@@ -15,6 +34,18 @@
           ],
           "default": null,
           "title": "Backgroundcolor"
+        },
+        "borderColor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bordercolor"
         },
         "borderRadius": {
           "anyOf": [
@@ -28,6 +59,36 @@
           "default": null,
           "title": "Borderradius"
         },
+        "borderStyle": {
+          "anyOf": [
+            {
+              "enum": [
+                "solid",
+                "dashed",
+                "dotted",
+                "none"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Borderstyle"
+        },
+        "borderWidth": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Borderwidth"
+        },
         "color": {
           "anyOf": [
             {
@@ -39,6 +100,55 @@
           ],
           "default": null,
           "title": "Color"
+        },
+        "columnGap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Columngap"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "enum": [
+                "block",
+                "flex",
+                "grid",
+                "inline",
+                "none"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Display"
+        },
+        "flexDirection": {
+          "anyOf": [
+            {
+              "enum": [
+                "row",
+                "column",
+                "row-reverse",
+                "column-reverse"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Flexdirection"
         },
         "fontSize": {
           "anyOf": [
@@ -94,6 +204,38 @@
           "default": null,
           "title": "Height"
         },
+        "justifyContent": {
+          "anyOf": [
+            {
+              "enum": [
+                "flex-start",
+                "flex-end",
+                "center",
+                "space-between",
+                "space-around",
+                "space-evenly"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Justifycontent"
+        },
+        "lineHeight": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lineheight"
+        },
         "margin": {
           "anyOf": [
             {
@@ -106,6 +248,78 @@
           "default": null,
           "title": "Margin"
         },
+        "marginBottom": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Marginbottom"
+        },
+        "marginLeft": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Marginleft"
+        },
+        "marginRight": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Marginright"
+        },
+        "marginTop": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Margintop"
+        },
+        "maxWidth": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Maxwidth"
+        },
+        "minWidth": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Minwidth"
+        },
         "padding": {
           "anyOf": [
             {
@@ -117,6 +331,66 @@
           ],
           "default": null,
           "title": "Padding"
+        },
+        "paddingBottom": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paddingbottom"
+        },
+        "paddingLeft": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paddingleft"
+        },
+        "paddingRight": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paddingright"
+        },
+        "paddingTop": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paddingtop"
+        },
+        "rowGap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rowgap"
         },
         "textAlign": {
           "anyOf": [

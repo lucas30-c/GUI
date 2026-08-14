@@ -1,6 +1,7 @@
-"""Provider 选择与配置装配测试 — 环境变量分支、DI override 优先、启动期校验。
+"""Provider 选择与配置装配测试 — Real-Provider-only、DI override 优先、启动期校验。
 
-覆盖 Spec 008 AC-01 ~ AC-02、AC-05 ~ AC-06、AC-09 ~ AC-11、AC-39 ~ AC-40。
+Real-Provider-only（Owner 决策）：生产链路只接受 GENUI_MODEL_PROVIDER=
+openai_compatible；mock 不再是运行时模式，测试替身只能经 create_app 显式注入。
 全程离线：真实 Provider 只被实例化，不发起任何请求。
 """
 
@@ -12,12 +13,12 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from genui_api.api.routes import get_generation_provider, get_provider
-from genui_api.generation.mock import MockGenerationProvider
 from genui_api.generation.openai_compat_provider import OpenAICompatGenerationProvider
 from genui_api.llm.client import ProviderConfigError
 from genui_api.main import create_app
-from genui_api.provider.mock import MockProvider
 from genui_api.provider.openai_compat_provider import OpenAICompatRefinementProvider
+from tests.doubles.generation import MockGenerationProvider
+from tests.doubles.refinement import MockProvider
 
 PLACEHOLDER_KEY = "test-api-key-placeholder"
 PLACEHOLDER_BASE_URL = "https://example.invalid/v1"
@@ -82,34 +83,51 @@ class RecordingRefinementProvider:
 
 
 # ============================================================
-# 默认（未设置任何环境变量）→ Mock（AC-01）
+# Real-Provider-only：默认与 mock 值都不再是合法运行时模式
 # ============================================================
 
 
-def test_default_selects_mock_providers():
-    assert isinstance(get_provider(), MockProvider)
-    assert isinstance(get_generation_provider(), MockGenerationProvider)
+def test_default_without_env_fails_fast_not_mock(monkeypatch):
+    """未设置 GENUI_MODEL_PROVIDER 时 fail fast，绝不回退 Mock。"""
+    monkeypatch.delenv("GENUI_MODEL_PROVIDER", raising=False)
+    with pytest.raises(ProviderConfigError):
+        get_provider()
+    with pytest.raises(ProviderConfigError):
+        get_generation_provider()
 
 
 @pytest.mark.parametrize("raw", ["mock", "  mock  ", "MOCK"])
-def test_explicit_mock_selects_mock_providers(monkeypatch, raw):
+def test_mock_value_is_rejected_as_runtime_mode(monkeypatch, raw):
+    """mock 不再是运行时模式：显式设置也被拒绝（测试替身只能注入）。"""
     monkeypatch.setenv("GENUI_MODEL_PROVIDER", raw)
-    assert isinstance(get_provider(), MockProvider)
-    assert isinstance(get_generation_provider(), MockGenerationProvider)
+    with pytest.raises(ProviderConfigError):
+        get_generation_provider()
+    with pytest.raises(ProviderConfigError):
+        get_provider()
 
 
-def test_mock_mode_ignores_present_credentials(monkeypatch):
-    """mock 模式即使环境里有凭证也不切换 Provider（默认离线不可被环境意外破坏）。"""
+def test_rejected_config_error_mentions_env_var(monkeypatch):
     monkeypatch.setenv("GENUI_MODEL_PROVIDER", "mock")
-    monkeypatch.setenv("GENUI_LLM_API_KEY", PLACEHOLDER_KEY)
-    monkeypatch.setenv("GENUI_LLM_BASE_URL", PLACEHOLDER_BASE_URL)
-    monkeypatch.setenv("GENUI_GENERATION_MODEL", "placeholder-generation-model")
-    assert isinstance(get_generation_provider(), MockGenerationProvider)
-    assert isinstance(get_provider(), MockProvider)
+    with pytest.raises(ProviderConfigError) as exc:
+        get_generation_provider()
+    assert "GENUI_MODEL_PROVIDER" in str(exc.value)
 
 
-def test_default_app_still_serves_mock_generation():
-    client = TestClient(create_app())
+def test_default_app_requires_real_config(monkeypatch):
+    """未注入 Provider 时，create_app 要求真实配置，否则启动失败（fail fast）。"""
+    monkeypatch.delenv("GENUI_MODEL_PROVIDER", raising=False)
+    with pytest.raises(ProviderConfigError):
+        create_app()
+
+
+def test_injected_mock_doubles_still_serve_generation():
+    """测试替身经显式注入仍可用——但这是测试装配，不是生产默认。"""
+    client = TestClient(
+        create_app(
+            refinement_provider=MockProvider(),
+            generation_provider=MockGenerationProvider(),
+        )
+    )
     response = client.post(
         "/api/v1/dsl/generate",
         content=json.dumps({"prompt": "做一个咖啡店落地页"}),
@@ -119,14 +137,19 @@ def test_default_app_still_serves_mock_generation():
     assert response.json()["success"] is True
 
 
-def test_mock_generation_remains_deterministic():
-    """同一 prompt 两次调用得到完全相同的文档（Mock 的确定性不被本次改动影响）。"""
-    client = TestClient(create_app())
+def test_injected_mock_generation_remains_deterministic():
+    """同一 prompt 两次调用得到完全相同的文档（注入替身的确定性）。"""
+    client = TestClient(
+        create_app(
+            refinement_provider=MockProvider(),
+            generation_provider=MockGenerationProvider(),
+        )
+    )
     payload = json.dumps({"prompt": "做一个咖啡店落地页"})
     headers = {"Content-Type": "application/json"}
     first = client.post("/api/v1/dsl/generate", content=payload, headers=headers)
     second = client.post("/api/v1/dsl/generate", content=payload, headers=headers)
-    assert first.json() == second.json()
+    assert first.json()["document"] == second.json()["document"]
 
 
 # ============================================================
@@ -271,20 +294,17 @@ def test_injected_refinement_provider_is_used_end_to_end(monkeypatch):
     assert response.json()["integrity"]["nonTargetNodesUnchanged"] is True
 
 
-def test_three_way_coexistence(monkeypatch):
-    """真实 env 配置 + Mock 默认 + 显式注入三点共存，互不干扰（AC-40）。"""
+def test_injection_and_env_selection_coexist(monkeypatch):
+    """显式注入与真实 env 配置两条装配路径共存，互不干扰。"""
     injected_app = create_app(
         refinement_provider=RecordingRefinementProvider(),
         generation_provider=RecordingGenerationProvider(),
     )
     assert TestClient(injected_app).get("/health").status_code == 200
 
-    mock_app = create_app()
-    assert TestClient(mock_app).get("/health").status_code == 200
-    assert isinstance(get_generation_provider(), MockGenerationProvider)
-
     _set_real_env(monkeypatch)
     assert isinstance(get_generation_provider(), OpenAICompatGenerationProvider)
+    assert isinstance(get_provider(), OpenAICompatRefinementProvider)
 
 
 # --- 模块级 app 入口点（惰性）---------------------------------------------------
@@ -311,7 +331,7 @@ def test_importing_main_does_not_validate_config(monkeypatch):
 
 def test_module_level_app_resolves_and_is_cached(monkeypatch):
     """`uvicorn genui_api.main:app` 的入口点仍然可解析，且重复访问返回同一实例。"""
-    monkeypatch.setenv("GENUI_MODEL_PROVIDER", "mock")
+    _set_real_env(monkeypatch)
     module = importlib.reload(importlib.import_module("genui_api.main"))
 
     app = module.app
@@ -335,7 +355,7 @@ def test_module_level_app_still_fails_fast_on_invalid_config(monkeypatch):
 
 def test_main_module_rejects_unknown_attribute(monkeypatch):
     """惰性 __getattr__ 只暴露 app，其余属性仍按常规抛 AttributeError。"""
-    monkeypatch.setenv("GENUI_MODEL_PROVIDER", "mock")
+    _set_real_env(monkeypatch)
     module = importlib.reload(importlib.import_module("genui_api.main"))
 
     with pytest.raises(AttributeError):

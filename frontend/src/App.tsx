@@ -34,8 +34,8 @@ export const MAX_HISTORY_TURNS = 20;
 export const MAX_TURN_PROPS_KEYS = 16;
 
 /** 单轮 patchStyle 键数上限，与后端 MAX_TURN_STYLE_KEYS 同值（DD-22@010）；
- *  等于 DSL Style 白名单字段数——一轮最多把 11 个受控字段各写一次 */
-export const MAX_TURN_STYLE_KEYS = 11;
+ *  等于 DSL Style 白名单字段数——一轮最多把 31 个受控字段各写一次 */
+export const MAX_TURN_STYLE_KEYS = 31;
 
 /** 提交层完整性检查失败文案（前端自有固定文案，不含服务端原文或 document 内容） */
 export const INTEGRITY_ERROR_MESSAGES = {
@@ -476,7 +476,7 @@ function App({ fetcher }: AppProps) {
     <div className="workbench">
       <header className="workbench-header">
         <h1>GenUI</h1>
-        <span className="status">初稿生成 + 局部精修（Mock Provider）</span>
+        <span className="status">AI 页面生成 · 局部精修</span>
       </header>
       <section className="generate-bar">
         <div className="generate-row">
@@ -513,21 +513,30 @@ function App({ fetcher }: AppProps) {
         {state.generateError !== null ? (
           <div className="generate-error" data-testid="generate-error">
             <p className="refine-label">初稿生成失败</p>
-            <p data-testid="generate-error-kind">
-              {state.generateError.kind === 'server' ? '服务端错误' : '本地错误'}
-            </p>
-            <p data-testid="generate-error-code">{state.generateError.code}</p>
             <p data-testid="generate-error-message">{state.generateError.message}</p>
-            {state.generateError.kind === 'server' &&
-            state.generateError.issues.length > 0 ? (
-              <ul data-testid="generate-error-issues">
-                {state.generateError.issues.map((issue, index) => (
-                  <li key={`${issue.path}-${index}`} data-testid="generate-error-issue">
-                    {issue.path} · {issue.code} · {issue.message}
-                  </li>
-                ))}
-              </ul>
+            {state.generateError.kind === 'server' && state.generateError.requestId ? (
+              <p className="error-request-id" data-testid="generate-error-request-id">
+                请求编号：{state.generateError.requestId}
+              </p>
             ) : null}
+            {/* 技术细节默认折叠：普通用户只看上方可读文案与请求编号 */}
+            <details className="error-details" data-testid="generate-error-details">
+              <summary>技术细节（开发者）</summary>
+              <p data-testid="generate-error-kind">
+                {state.generateError.kind === 'server' ? '服务端错误' : '本地错误'}
+              </p>
+              <p data-testid="generate-error-code">{state.generateError.code}</p>
+              {state.generateError.kind === 'server' &&
+              state.generateError.issues.length > 0 ? (
+                <ul data-testid="generate-error-issues">
+                  {state.generateError.issues.map((issue, index) => (
+                    <li key={`${issue.path}-${index}`} data-testid="generate-error-issue">
+                      {issue.path} · {issue.code} · {issue.message}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </details>
           </div>
         ) : null}
       </section>
@@ -570,7 +579,7 @@ function App({ fetcher }: AppProps) {
               className="refine-instruction"
               data-testid="refine-instruction"
               aria-label="精修指令"
-              placeholder="例如：set_text:新的标题文案（Ctrl/Cmd + Enter 提交）"
+              placeholder="例如：把标题改成「秋日新品上市」（Ctrl/Cmd + Enter 提交）"
               value={state.instruction}
               onChange={(event) =>
                 dispatch({ type: 'SET_INSTRUCTION', instruction: event.target.value })
@@ -671,20 +680,29 @@ function App({ fetcher }: AppProps) {
             {state.error !== null ? (
               <div className="refine-error" data-testid="refine-error">
                 <p className="refine-label">精修失败</p>
-                <p data-testid="refine-error-kind">
-                  {state.error.kind === 'server' ? '服务端错误' : '本地错误'}
-                </p>
-                <p data-testid="refine-error-code">{state.error.code}</p>
                 <p data-testid="refine-error-message">{state.error.message}</p>
-                {state.error.kind === 'server' && state.error.issues.length > 0 ? (
-                  <ul data-testid="refine-error-issues">
-                    {state.error.issues.map((issue, index) => (
-                      <li key={`${issue.path}-${index}`} data-testid="refine-error-issue">
-                        {issue.path} · {issue.code} · {issue.message}
-                      </li>
-                    ))}
-                  </ul>
+                {state.error.kind === 'server' && state.error.requestId ? (
+                  <p className="error-request-id" data-testid="refine-error-request-id">
+                    请求编号：{state.error.requestId}
+                  </p>
                 ) : null}
+                {/* 技术细节默认折叠：普通用户只看上方可读文案与请求编号 */}
+                <details className="error-details" data-testid="refine-error-details">
+                  <summary>技术细节（开发者）</summary>
+                  <p data-testid="refine-error-kind">
+                    {state.error.kind === 'server' ? '服务端错误' : '本地错误'}
+                  </p>
+                  <p data-testid="refine-error-code">{state.error.code}</p>
+                  {state.error.kind === 'server' && state.error.issues.length > 0 ? (
+                    <ul data-testid="refine-error-issues">
+                      {state.error.issues.map((issue, index) => (
+                        <li key={`${issue.path}-${index}`} data-testid="refine-error-issue">
+                          {issue.path} · {issue.code} · {issue.message}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </details>
               </div>
             ) : null}
           </section>

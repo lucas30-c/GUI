@@ -94,10 +94,10 @@ describe('mapDslStyle', () => {
   })
 
   it('does NOT include unknown fields', () => {
-    const style = { color: 'red', display: 'flex', position: 'absolute' } as unknown as DslStyle
+    const style = { color: 'red', objectFit: 'cover', position: 'absolute' } as unknown as DslStyle
     const result = mapDslStyle(style)
     expect(result.color).toBe('red')
-    expect('display' in result).toBe(false)
+    expect('objectFit' in result).toBe(false)
     expect('position' in result).toBe(false)
   })
 

@@ -11,9 +11,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from genui_api.generation.base import UnrecognizedIntentError
+import genui_api.generation.openai_compat_provider as provider_module
 from genui_api.generation.openai_compat_provider import (
     MAX_TOKENS,
+    MODE_JSON_OBJECT,
+    MODE_JSON_SCHEMA,
     TEMPERATURE,
     OpenAICompatGenerationProvider,
 )
@@ -37,6 +39,14 @@ VALID_DSL = {
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+@pytest.fixture(autouse=True)
+def _reset_structured_output_mode():
+    """结构化输出模式是进程内协商状态（模块级）；每个测试前复位，保证隔离。"""
+    provider_module._active_mode = MODE_JSON_SCHEMA
+    yield
+    provider_module._active_mode = MODE_JSON_SCHEMA
 
 
 # ============================================================
@@ -84,7 +94,8 @@ def test_provider_can_be_constructed_without_credentials():
 
 def test_default_sampling_constants_are_deterministic():
     assert TEMPERATURE == 0.0
-    assert MAX_TOKENS == 4096
+    # 复杂页面输出可达数千 token；8000 经真实端点验证，避免截断产生半成品 JSON。
+    assert MAX_TOKENS == 8000
 
 
 # ============================================================
@@ -105,10 +116,17 @@ def test_generate_draft_uses_injected_model_not_environment():
     assert client.calls[0]["model"] == TEST_MODEL, client.calls[0]
 
 
-def test_generate_draft_requests_json_object_response_format():
+def test_generate_draft_requests_json_schema_response_format_by_default():
+    """第一层收敛：默认以 DSL Schema 驱动的 json_schema 结构化输出约束候选。"""
     provider, client = _provider(content=json.dumps(VALID_DSL))
     _run(provider.generate_draft("做一个落地页"))
-    assert client.calls[0]["response_format"] == {"type": "json_object"}
+    response_format = client.calls[0]["response_format"]
+    assert response_format["type"] == "json_schema"
+    json_schema = response_format["json_schema"]
+    assert json_schema["name"] == "genui_dsl_document"
+    # Schema 派生自唯一契约事实来源（DslDocument 模型），含递归 $defs
+    assert json_schema["schema"]["$defs"]
+    assert json_schema["schema"]["properties"]["version"]["const"] == "0.1"
 
 
 def test_generate_draft_passes_deterministic_sampling():
@@ -116,7 +134,7 @@ def test_generate_draft_passes_deterministic_sampling():
     _run(provider.generate_draft("做一个落地页"))
     kwargs = client.calls[0]
     assert kwargs["temperature"] == 0.0
-    assert kwargs["max_tokens"] == 4096
+    assert kwargs["max_tokens"] == 8000
 
 
 def test_generate_draft_separates_system_and_user_roles():
@@ -145,12 +163,12 @@ def test_generate_draft_returns_candidate_without_sanitizing():
 
 
 def test_response_format_is_a_fresh_copy_per_call():
-    """response_format 每次传入独立副本，被调用方改动不会污染模块常量。"""
+    """response_format 每次传入独立外层 dict，被调用方改动不会污染后续调用。"""
     provider, client = _provider(content=json.dumps(VALID_DSL))
     _run(provider.generate_draft("a"))
     client.calls[0]["response_format"]["type"] = "mutated"
     _run(provider.generate_draft("b"))
-    assert client.calls[1]["response_format"] == {"type": "json_object"}
+    assert client.calls[1]["response_format"]["type"] == "json_schema"
 
 
 # ============================================================
@@ -197,12 +215,106 @@ def test_generate_draft_converts_sdk_exception_to_sanitized_error():
     assert exc.value.__cause__ is None
 
 
-def test_generate_draft_never_raises_unrecognized_intent():
-    """真实 Provider 不做意图分类：失败必须表达为 provider 错误而非「意图无法识别」。"""
+def test_generate_draft_failure_is_provider_response_error_not_intent():
+    """真实 Provider 不做意图分类：内容不可用 → ProviderResponseError（固定文案）。
+
+    「意图无法识别」概念已从产品移除——失败就是失败，由上层 fail-closed。
+    """
     provider, _ = _provider(content="not json")
+    with pytest.raises(ProviderResponseError):
+        _run(provider.generate_draft("x"))
+
+
+# ============================================================
+# 结构化输出降级梯度（json_schema → json_object）
+# ============================================================
+
+
+class _FormatRejection400(Exception):
+    """模拟端点拒绝 json_schema 的 400（带 status_code 与 schema 字样）。"""
+
+    status_code = 400
+
+    def __str__(self):
+        return "Error code: 400 - response_format.json_schema is not supported"
+
+
+class DowngradeStubClient(StubClient):
+    """首次调用按 raises 抛错，之后恢复正常（用于模拟一次性协商失败）。"""
+
+    def __init__(self, *, fail_first=None, **kwargs):
+        super().__init__(**kwargs)
+        self._fail_first = fail_first
+
+    async def _create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self._fail_first is not None:
+            exc = self._fail_first
+            self._fail_first = None
+            raise exc
+        if not self.with_choices:
+            return SimpleNamespace(choices=[], usage=self.usage)
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content=self.content))],
+            usage=self.usage,
+        )
+
+
+def test_downgrades_to_json_object_when_endpoint_rejects_json_schema():
+    """端点拒绝 json_schema（400 + schema 字样）→ 本次请求内降级并重试成功。"""
+    client = DowngradeStubClient(
+        fail_first=_FormatRejection400(), content=json.dumps(VALID_DSL)
+    )
+    provider = OpenAICompatGenerationProvider(client=client, model=TEST_MODEL)
+    result = _run(provider.generate_draft("做一个落地页"))
+    assert result == VALID_DSL
+    # 第一次 json_schema，第二次 json_object
+    assert client.calls[0]["response_format"]["type"] == "json_schema"
+    assert client.calls[1]["response_format"] == {"type": "json_object"}
+    # 协商结果对进程内后续调用固定
+    assert provider_module._active_mode == MODE_JSON_OBJECT
+
+
+def test_downgrade_persists_for_subsequent_requests():
+    client = DowngradeStubClient(
+        fail_first=_FormatRejection400(), content=json.dumps(VALID_DSL)
+    )
+    provider = OpenAICompatGenerationProvider(client=client, model=TEST_MODEL)
+    _run(provider.generate_draft("a"))
+    _run(provider.generate_draft("b"))
+    # 第三次调用（第二个请求）直接用 json_object，不再试探 json_schema
+    assert client.calls[2]["response_format"] == {"type": "json_object"}
+    assert provider_module._active_mode == MODE_JSON_OBJECT
+
+
+def test_non_format_400_does_not_downgrade():
+    """与格式无关的 400（如模型名非法）不触发降级，直接净化上报。"""
+
+    class ModelNotFound400(Exception):
+        status_code = 400
+
+        def __str__(self):
+            return "Error code: 400 - model not found"
+
+    provider, _ = _provider(raises=ModelNotFound400())
+    with pytest.raises(ProviderResponseError):
+        _run(provider.generate_draft("x"))
+    assert provider_module._active_mode == MODE_JSON_SCHEMA
+
+
+def test_downgrade_failure_still_sanitized():
+    """json_schema 与 json_object 都失败时，仍是固定净化文案，无端点/凭证泄漏。"""
+
+    class Always400(DowngradeStubClient):
+        async def _create(self, **kwargs):
+            self.calls.append(kwargs)
+            raise _FormatRejection400()
+
+    client = Always400(content=json.dumps(VALID_DSL))
+    provider = OpenAICompatGenerationProvider(client=client, model=TEST_MODEL)
     with pytest.raises(ProviderResponseError) as exc:
         _run(provider.generate_draft("x"))
-    assert not isinstance(exc.value, UnrecognizedIntentError)
+    assert "json_schema" not in str(exc.value)
 
 
 def test_generate_draft_error_message_is_fixed():

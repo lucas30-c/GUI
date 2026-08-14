@@ -15,10 +15,11 @@ from openai import AsyncOpenAI
 
 logger = logging.getLogger("genui.llm")
 
-# 允许的 Provider 传输模式（描述协议形态，不是厂商名）
-PROVIDER_MOCK = "mock"
+# 生产链路唯一的 Provider 传输模式（描述协议形态，不是厂商名）。
+# Real-Provider-only（Owner 决策）：mock 不是运行时模式——测试替身只能位于
+# 测试范围内，通过 create_app(dependency_overrides) 显式注入，不经由此配置。
 PROVIDER_OPENAI_COMPATIBLE = "openai_compatible"
-ALLOWED_PROVIDERS = (PROVIDER_MOCK, PROVIDER_OPENAI_COMPATIBLE)
+ALLOWED_PROVIDERS = (PROVIDER_OPENAI_COMPATIBLE,)
 
 # 环境变量名（Provider-neutral，不绑定任何厂商）
 ENV_PROVIDER = "GENUI_MODEL_PROVIDER"
@@ -28,7 +29,8 @@ ENV_GENERATION_MODEL = "GENUI_GENERATION_MODEL"
 ENV_REFINEMENT_MODEL = "GENUI_REFINEMENT_MODEL"
 
 # 采样与传输常量（DD-19）：写死为模块常量，不外置为环境变量
-DEFAULT_TIMEOUT = 30.0
+# P0 修复：增加超时到 120 秒，支持复杂页面生成（bounded retry 最多 2 次，总时间可达 360 秒）
+DEFAULT_TIMEOUT = 120.0
 DEFAULT_MAX_RETRIES = 0
 
 # 固定净化文案（DD-12）：不插值异常原文 / 凭证 / 端点 / 路径 / prompt / 模型输出
@@ -55,7 +57,7 @@ class ProviderResponseError(RuntimeError):
 
 @dataclass(frozen=True)
 class ModelConfig:
-    """模型配置快照。mock 模式下除 provider 外全部为 None（无默认模型名）。"""
+    """模型配置快照（Real-Provider-only：provider 恒为 openai_compatible）。"""
 
     provider: str
     api_key: str | None = None
@@ -77,17 +79,19 @@ def load_model_config() -> ModelConfig:
     """从环境变量读取并校验模型配置；非法时抛 ProviderConfigError。
 
     这是唯一读取 GENUI_MODEL_PROVIDER / GENUI_LLM_* / GENUI_*_MODEL 的函数（AC-05）。
+
+    Real-Provider-only：生产链路只接受 GENUI_MODEL_PROVIDER=openai_compatible。
+    未设置或设置为 mock 都会 fail fast——Mock 从 M4-05 起不再是运行时模式，
+    测试替身只能经 create_app 显式注入（不经过本配置）。
     """
     raw_provider = os.environ.get(ENV_PROVIDER, "")
-    provider = raw_provider.strip().lower() or PROVIDER_MOCK
-
-    if provider == PROVIDER_MOCK:
-        # mock 模式：不读取任何凭证，四项一律 None（AC-06）
-        return ModelConfig(provider=PROVIDER_MOCK)
+    provider = raw_provider.strip().lower()
 
     if provider != PROVIDER_OPENAI_COMPATIBLE:
         raise ProviderConfigError(
-            f"Unknown {ENV_PROVIDER}: expected one of {', '.join(ALLOWED_PROVIDERS)}"
+            f"{ENV_PROVIDER} must be '{PROVIDER_OPENAI_COMPATIBLE}' "
+            f"(got {raw_provider!r} or unset). Real-Provider-only: Mock 不再是运行时模式，"
+            f"测试替身请通过 create_app 显式注入。"
         )
 
     api_key = _read(ENV_API_KEY)

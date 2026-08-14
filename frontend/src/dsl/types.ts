@@ -1,18 +1,46 @@
 // DSL v0.1 TypeScript types — mirrors backend/src/genui_api/contracts/dsl.py exactly
 
-/** Style whitelist (11 fields only) */
+/** Style DSL v2 whitelist (31 fields) — Box Model + Layout + Typography + Border */
 export interface DslStyle {
+  // Box: Margin
+  margin?: string | null;
+  marginTop?: string | null;
+  marginRight?: string | null;
+  marginBottom?: string | null;
+  marginLeft?: string | null;
+  // Box: Padding
+  padding?: string | null;
+  paddingTop?: string | null;
+  paddingRight?: string | null;
+  paddingBottom?: string | null;
+  paddingLeft?: string | null;
+  // Box: Gap
+  gap?: string | null;
+  rowGap?: string | null;
+  columnGap?: string | null;
+  // Sizing
+  width?: string | null;
+  height?: string | null;
+  maxWidth?: string | null;
+  minWidth?: string | null;
+  // Color
   color?: string | null;
   backgroundColor?: string | null;
+  // Typography
   fontSize?: string | null;
   fontWeight?: 'normal' | 'medium' | 'semibold' | 'bold' | null;
   textAlign?: 'left' | 'center' | 'right' | null;
-  width?: string | null;
-  height?: string | null;
-  padding?: string | null;
-  margin?: string | null;
+  lineHeight?: string | null;
+  // Layout
+  display?: 'block' | 'flex' | 'grid' | 'inline' | 'none' | null;
+  flexDirection?: 'row' | 'column' | 'row-reverse' | 'column-reverse' | null;
+  justifyContent?: 'flex-start' | 'flex-end' | 'center' | 'space-between' | 'space-around' | 'space-evenly' | null;
+  alignItems?: 'flex-start' | 'flex-end' | 'center' | 'stretch' | 'baseline' | null;
+  // Border
+  borderWidth?: string | null;
+  borderStyle?: 'solid' | 'dashed' | 'dotted' | 'none' | null;
+  borderColor?: string | null;
   borderRadius?: string | null;
-  gap?: string | null;
 }
 
 // Props for each component

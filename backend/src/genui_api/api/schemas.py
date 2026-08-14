@@ -52,7 +52,10 @@ class ValidationErrorDetail(BaseModel):
 class DslValidationFailure(BaseModel):
     """DSL 校验失败响应"""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     valid: bool = False  # 固定为 false
+    request_id: str = Field(alias="requestId", default="")
     error: ValidationErrorDetail
 
 
@@ -166,6 +169,7 @@ class RefineFailure(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     success: Literal[False]
+    request_id: str = Field(alias="requestId")
     error: ValidationErrorDetail
 
 
@@ -180,15 +184,45 @@ class GenerateRequest(BaseModel):
     prompt: str
 
 
+class NormalizationEntry(BaseModel):
+    """一条无损规范化转换（meta.normalization 元素）。"""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    path: str
+    kind: str
+    before: str
+    after: str
+
+
+class GenerateMeta(BaseModel):
+    """初稿生成过程元数据：观测与验收统计用，不含 prompt / 模型输出原文。"""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    request_id: str = Field(alias="requestId")
+    provider: str
+    model: str | None = None
+    structured_output: str = Field(alias="structuredOutput")
+    attempts: int
+    repair_used: bool = Field(alias="repairUsed")
+    normalization: list[NormalizationEntry]
+    duration_ms: int = Field(alias="durationMs")
+
+
 class GenerateSuccess(BaseModel):
     """初稿生成成功响应。"""
 
     success: Literal[True]
     document: dict  # DslDocument.model_dump(mode="json")
+    meta: GenerateMeta
 
 
 class GenerateFailure(BaseModel):
     """初稿生成失败响应。"""
 
+    model_config = ConfigDict(populate_by_name=True)
+
     success: Literal[False]
+    request_id: str = Field(alias="requestId")
     error: ValidationErrorDetail

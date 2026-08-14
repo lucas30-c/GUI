@@ -7,12 +7,14 @@ import type { Locator, Page } from '@playwright/test';
  * 一条 spec 覆盖普通用户的完整验收链路：
  * 一句话生成初稿 → 点击选中控件 → 文案精修 → 颜色精修 → 尺寸精修 → 非目标节点零变更。
  *
- * 前后端由 playwright.config.ts 的 webServer 数组统一启动，Provider 全部为默认 Mock：
- * 因此本 spec 是**确定性**的收口证据（无网络、无凭证、无随机），
- * 真实模型路径的证据由 opt-in 的 backend/tests/llm/test_real_style_smoke.py 单独承担。
+ * 前后端由 playwright.config.ts 的 webServer 数组统一启动（干净进程）：
+ * 确定性轨道 —— FastAPI 经 tests/e2e_app.py 注入测试替身（仅测试范围）与
+ * Vite dev server（5173 → 8000）。因此本 spec 是**确定性**的收口证据
+ * （无网络、无凭证、无随机）。真实模型路径的证据由 opt-in 的
+ * backend/tests/llm/test_real_*.py 与真实浏览器验收 complex-generation.spec.ts 承担。
  */
 
-/** 咖啡店初稿模板（backend/src/genui_api/generation/templates.py） */
+/** 咖啡店初稿模板（backend/tests/doubles/templates.py） */
 const DRAFT_TITLE = '晨光咖啡工坊';
 const DRAFT_SUBTITLE = '清晨现烘的豆子，配一杯慢下来的时间';
 const DRAFT_MENU_TITLE = '本店饮品';

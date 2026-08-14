@@ -115,8 +115,9 @@ function sanitizeIssues(value: unknown): ValidationIssue[] {
   return issues;
 }
 
-/** C-8：失败响应净化 — 只提取 code / message / issues，丢弃 document / patch / trace 等一切额外字段 */
-function toServerError(rawError: unknown): RefineServerError | null {
+/** C-8：失败响应净化 — 只提取 code / message / issues，丢弃 document / patch / trace 等一切额外字段。
+ *  requestId 来自失败 envelope 顶层（或响应头 X-Request-ID），由调用方传入。 */
+function toServerError(rawError: unknown, requestId: string): RefineServerError | null {
   if (!isRecord(rawError)) return null;
   if (typeof rawError.code !== 'string') return null;
   if (typeof rawError.message !== 'string') return null;
@@ -124,6 +125,7 @@ function toServerError(rawError: unknown): RefineServerError | null {
     kind: 'server',
     code: rawError.code,
     message: rawError.message,
+    requestId,
     issues: sanitizeIssues(rawError.issues),
   };
 }
@@ -170,7 +172,12 @@ export async function refineNode(
   if (success !== isHttpOk) return localError('invalid_response');
 
   if (!success) {
-    const serverError = toServerError(raw.error);
+    // requestId：envelope 顶层优先，响应头兜底（两者都由后端中间件保证）
+    const requestId =
+      typeof raw.requestId === 'string'
+        ? raw.requestId
+        : response.headers.get('X-Request-ID') ?? '';
+    const serverError = toServerError(raw.error, requestId);
     if (serverError === null) return localError('invalid_response');
     return serverError;
   }

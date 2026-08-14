@@ -125,8 +125,10 @@ export interface RefineClientSuccess {
 export interface RefineServerError {
   kind: "server";
   code: string;                // 来自后端 error.code
-  message: string;             // 净化后的 error.message
-  issues: ValidationIssue[];   // 净化后的 error.issues（缺失时为 []）
+  message: string;             // 净化后的 error.message（用户可读文案）
+  /** 请求追踪 ID（失败 envelope 的 requestId）；用于与后端日志串联排查 */
+  requestId: string;
+  issues: ValidationIssue[];   // 净化后的 error.issues（缺失时为 []，UI 默认折叠）
 }
 
 /** 前端本地错误码 */
@@ -163,7 +165,9 @@ export interface GenerateServerError {
   kind: "server";
   code: string;
   message: string;
-  issues: ValidationIssue[];   // 缺失时为 []
+  /** 请求追踪 ID（失败 envelope 的 requestId）；用于与后端日志串联排查 */
+  requestId: string;
+  issues: ValidationIssue[];   // 缺失时为 []（UI 默认折叠展示）
 }
 
 /** 生成本地错误：复用 RefineLocalErrorCode（三类语义完全相同） */

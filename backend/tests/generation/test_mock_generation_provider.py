@@ -8,9 +8,8 @@ from pathlib import Path
 import pytest
 
 from genui_api.contracts.validation import validate_dsl_document
-from genui_api.generation.base import UnrecognizedIntentError
-from genui_api.generation.mock import MockGenerationProvider
-from genui_api.generation.templates import (
+from tests.doubles.generation import MockGenerationProvider
+from tests.doubles.templates import (
     TEMPLATE_COFFEE_SHOP,
     TEMPLATE_EVENT_SIGNUP,
     TEMPLATE_PRODUCT_INTRO,
@@ -131,7 +130,7 @@ def test_priority_event_beats_product():
 
 
 # ============================================================
-# 无命中：安全失败，不兜底
+# 无命中：确定性回退（「意图无法识别」概念已从产品移除）
 # ============================================================
 
 
@@ -139,16 +138,17 @@ def test_priority_event_beats_product():
     "prompt",
     ["随便来点什么", "hello world", "帮我写首诗", "做个后台管理系统"],
 )
-def test_unmatched_prompt_raises_unrecognized_intent(prompt):
-    with pytest.raises(UnrecognizedIntentError):
-        _draft(prompt)
+def test_unmatched_prompt_falls_back_to_default_template(prompt):
+    # Real-Provider-only：测试替身不再抛「意图无法识别」，
+    # 无关键词命中时确定性回退到默认模板（仍是合法 DSL 文档）。
+    result = _draft(prompt)
+    assert result == TEMPLATE_PRODUCT_INTRO
+    validate_dsl_document(result)
 
 
-def test_unmatched_prompt_returns_no_default_template():
-    # 无命中时不得返回任何模板：必须抛异常而非返回值
+def test_unmatched_prompt_fallback_is_deterministic():
     for prompt in ("随便来点什么", "xyz"):
-        with pytest.raises(UnrecognizedIntentError):
-            _draft(prompt)
+        assert _draft(prompt) == _draft(prompt)
 
 
 # ============================================================

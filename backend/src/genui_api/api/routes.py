@@ -1,6 +1,8 @@
 """API 路由 — DSL 校验、局部精修与初稿生成 HTTP 接口"""
 
 import json
+import logging
+import time
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
@@ -9,9 +11,11 @@ from genui_api.api.schemas import (
     DslValidationFailure,
     DslValidationSuccess,
     GenerateFailure,
+    GenerateMeta,
     GenerateRequest,
     GenerateSuccess,
     HealthResponse,
+    NormalizationEntry,
     RefineFailure,
     RefineRequest,
     RefineSuccess,
@@ -25,37 +29,71 @@ from genui_api.contracts.validation import (
     validate_dsl_json,
 )
 from genui_api.generation.base import GenerationProvider
-from genui_api.generation.mock import MockGenerationProvider
-from genui_api.generation.openai_compat_provider import OpenAICompatGenerationProvider
+from genui_api.generation.openai_compat_provider import (
+    OpenAICompatGenerationProvider,
+    current_response_mode,
+)
 from genui_api.generation.pipeline import GenerationError, generate_document
 from genui_api.llm.client import PROVIDER_OPENAI_COMPATIBLE, load_model_config
 from genui_api.provider.base import ConfirmedTurn, RefinementProvider
-from genui_api.provider.mock import MockProvider
 from genui_api.provider.openai_compat_provider import OpenAICompatRefinementProvider
 from genui_api.refinement.pipeline import refine, RefinementError
+
+logger = logging.getLogger("genui.api")
 
 router = APIRouter()
 
 
-def get_provider() -> RefinementProvider:
-    """精修 Provider 工厂：按 GENUI_MODEL_PROVIDER 选择 Mock 或真实 Provider（DD-5）。
+def _request_id(request: Request) -> str:
+    """读取中间件注入的 request ID（缺省空串，测试直调时不报错）。"""
+    return getattr(request.state, "request_id", "")
 
-    mock / 未设置 → 无状态 MockProvider（不实例化 SDK、不读凭证、不发网络请求）。
-    显式注入的 Provider 由 create_app 通过 dependency_overrides 覆盖本工厂，
-    因此注入优先于环境变量。
+
+# ============================================================
+# 用户可见错误文案（分层错误边界，RC6 修复）
+# ============================================================
+# error.message 面向普通用户：可理解、可重试、不含内部路径与 Pydantic 原文。
+# error.issues[] 保留结构化诊断细节（前端默认折叠，供开发者排查）。
+# 后端日志记录完整 issue 列表 + request ID（观测层）。
+_USER_FACING_MESSAGES: dict[str, str] = {
+    # generate
+    "invalid_prompt": "页面描述为空或超长，请调整后重试。",
+    "provider_error": "AI 服务暂时不可用，请稍后重试。",
+    "invalid_generated_document": "AI 生成的页面未通过系统校验，请重试，或尝试简化页面描述。",
+    # refine
+    "invalid_instruction": "精修指令为空或超长，请调整后重试。",
+    "invalid_source_document": "提交的页面文档无效，请刷新页面后重试。",
+    "target_node_not_found": "未找到选中的节点，请重新选择节点后重试。",
+    "invalid_request_structure": "请求格式不正确，请刷新页面后重试。",
+    "invalid_candidate_structure": "AI 的精修结果未通过系统校验，页面未被改动，请重试。",
+    "candidate_boundary_violation": "AI 的精修结果越过了允许的修改范围，已被系统拒绝，页面未被改动，请重试。",
+    "patch_application_failed": "AI 的精修结果无法应用到页面，页面未被改动，请重试。",
+    "non_target_mutation_detected": "精修完整性校验未通过，页面未被改动，请重试。",
+    # shared
+    "internal_error": "服务内部错误，请稍后重试。",
+    "unsupported_media_type": "请求类型不支持，请使用 JSON 提交。",
+    "invalid_json": "请求内容不是合法 JSON，请刷新页面后重试。",
+}
+
+
+def _user_message(code: str, fallback: str) -> str:
+    return _USER_FACING_MESSAGES.get(code, fallback)
+
+
+def get_provider() -> RefinementProvider:
+    """精修 Provider 工厂（Real-Provider-only）。
+
+    生产链路只返回真实 Provider；Mock 从生产路径移除（Owner 决策），
+    测试替身经 create_app 的 dependency_overrides 显式注入，优先于本工厂。
     """
-    config = load_model_config()
-    if config.provider == PROVIDER_OPENAI_COMPATIBLE:
-        return OpenAICompatRefinementProvider()
-    return MockProvider()
+    load_model_config()  # 配置非法 → fail fast（启动期已校验，这里是运行时守卫）
+    return OpenAICompatRefinementProvider()
 
 
 def get_generation_provider() -> GenerationProvider:
-    """生成 Provider 工厂：按 GENUI_MODEL_PROVIDER 选择 Mock 或真实 Provider（DD-5）。"""
-    config = load_model_config()
-    if config.provider == PROVIDER_OPENAI_COMPATIBLE:
-        return OpenAICompatGenerationProvider()
-    return MockGenerationProvider()
+    """生成 Provider 工厂（Real-Provider-only，同上）。"""
+    load_model_config()
+    return OpenAICompatGenerationProvider()
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -83,12 +121,13 @@ async def validate_dsl(request: Request) -> JSONResponse | DslValidationSuccess:
         return JSONResponse(
             status_code=415,
             content=DslValidationFailure(
+                request_id=_request_id(request),
                 error=ValidationErrorDetail(
                     code="unsupported_media_type",
-                    message="Content-Type 必须为 application/json",
+                    message=_user_message("unsupported_media_type", "Content-Type 必须为 application/json"),
                     issues=[],
-                )
-            ).model_dump(mode="json"),
+                ),
+            ).model_dump(mode="json", by_alias=True),
         )
 
     # 读取原始 body
@@ -99,12 +138,13 @@ async def validate_dsl(request: Request) -> JSONResponse | DslValidationSuccess:
         return JSONResponse(
             status_code=400,
             content=DslValidationFailure(
+                request_id=_request_id(request),
                 error=ValidationErrorDetail(
                     code="invalid_json",
                     message="请求体为空",
                     issues=[],
-                )
-            ).model_dump(mode="json"),
+                ),
+            ).model_dump(mode="json", by_alias=True),
         )
 
     body_str = body.decode("utf-8")
@@ -116,16 +156,17 @@ async def validate_dsl(request: Request) -> JSONResponse | DslValidationSuccess:
         return JSONResponse(
             status_code=400,
             content=DslValidationFailure(
+                request_id=_request_id(request),
                 error=ValidationErrorDetail(
                     code="invalid_json",
-                    message=str(e),
+                    message=_user_message("invalid_json", "JSON 解析失败"),
                     issues=[
                         ValidationIssue(
                             path="$", code="invalid_json", message=str(e)
                         )
                     ],
-                )
-            ).model_dump(mode="json"),
+                ),
+            ).model_dump(mode="json", by_alias=True),
         )
     except DslValidationError as e:
         # DSL 校验失败 — 区分结构错误和业务规则错误
@@ -148,24 +189,27 @@ async def validate_dsl(request: Request) -> JSONResponse | DslValidationSuccess:
         return JSONResponse(
             status_code=422,
             content=DslValidationFailure(
+                request_id=_request_id(request),
                 error=ValidationErrorDetail(
                     code=error_code,
                     message=error_message,
                     issues=issues,
-                )
-            ).model_dump(mode="json"),
+                ),
+            ).model_dump(mode="json", by_alias=True),
         )
     except Exception:
         # 未预期异常 → 500，不泄露内部信息
+        logger.exception("request_id=%s validate unexpected error", _request_id(request))
         return JSONResponse(
             status_code=500,
             content=DslValidationFailure(
+                request_id=_request_id(request),
                 error=ValidationErrorDetail(
                     code="internal_error",
-                    message="服务内部错误",
+                    message=_user_message("internal_error", "服务内部错误"),
                     issues=[],
-                )
-            ).model_dump(mode="json"),
+                ),
+            ).model_dump(mode="json", by_alias=True),
         )
 
     # 校验成功
@@ -224,12 +268,13 @@ async def refine_dsl(
             status_code=415,
             content=RefineFailure(
                 success=False,
+                request_id=_request_id(request),
                 error=ValidationErrorDetail(
                     code="unsupported_media_type",
-                    message="Content-Type 必须为 application/json",
+                    message=_user_message("unsupported_media_type", "Content-Type 必须为 application/json"),
                     issues=[],
                 ),
-            ).model_dump(mode="json"),
+            ).model_dump(mode="json", by_alias=True),
         )
 
     # 读取原始 body
@@ -241,12 +286,13 @@ async def refine_dsl(
             status_code=400,
             content=RefineFailure(
                 success=False,
+                request_id=_request_id(request),
                 error=ValidationErrorDetail(
                     code="invalid_json",
                     message="请求体为空",
                     issues=[],
                 ),
-            ).model_dump(mode="json"),
+            ).model_dump(mode="json", by_alias=True),
         )
 
     # JSON 解析
@@ -257,16 +303,17 @@ async def refine_dsl(
             status_code=400,
             content=RefineFailure(
                 success=False,
+                request_id=_request_id(request),
                 error=ValidationErrorDetail(
                     code="invalid_json",
-                    message="JSON 解析失败",
+                    message=_user_message("invalid_json", "JSON 解析失败"),
                     issues=[
                         ValidationIssue(
                             path="$", code="invalid_json", message="JSON 解析失败"
                         )
                     ],
                 ),
-            ).model_dump(mode="json"),
+            ).model_dump(mode="json", by_alias=True),
         )
 
     # 请求模型校验
@@ -277,9 +324,10 @@ async def refine_dsl(
             status_code=422,
             content=RefineFailure(
                 success=False,
+                request_id=_request_id(request),
                 error=ValidationErrorDetail(
                     code="invalid_request_structure",
-                    message="请求结构校验失败",
+                    message=_user_message("invalid_request_structure", "请求结构校验失败"),
                     issues=[
                         ValidationIssue(
                             path="$",
@@ -288,7 +336,7 @@ async def refine_dsl(
                         )
                     ],
                 ),
-            ).model_dump(mode="json"),
+            ).model_dump(mode="json", by_alias=True),
         )
 
     # wire → 域模型转换（Spec 009）：缺省 / null / [] 三态统一归一化为空 tuple。
@@ -318,28 +366,38 @@ async def refine_dsl(
             ValidationIssue(path=iss.path, code=iss.code, message=iss.message)
             for iss in e.issues
         ]
+        logger.warning(
+            "request_id=%s refine_failed code=%s issues=%d detail=%s",
+            _request_id(request),
+            e.code,
+            len(issues),
+            [(iss.path, iss.code) for iss in issues],
+        )
         return JSONResponse(
             status_code=status_code,
             content=RefineFailure(
                 success=False,
+                request_id=_request_id(request),
                 error=ValidationErrorDetail(
                     code=e.code,
-                    message=e.message,
+                    message=_user_message(e.code, e.message),
                     issues=issues,
                 ),
-            ).model_dump(mode="json"),
+            ).model_dump(mode="json", by_alias=True),
         )
     except Exception:
+        logger.exception("request_id=%s refine unexpected error", _request_id(request))
         return JSONResponse(
             status_code=500,
             content=RefineFailure(
                 success=False,
+                request_id=_request_id(request),
                 error=ValidationErrorDetail(
                     code="internal_error",
-                    message="An unexpected internal error occurred",
+                    message=_user_message("internal_error", "An unexpected internal error occurred"),
                     issues=[],
                 ),
-            ).model_dump(mode="json"),
+            ).model_dump(mode="json", by_alias=True),
         )
 
     # 成功
@@ -353,7 +411,7 @@ async def refine_dsl(
         ),
     )
     content = success.model_dump(mode="json", by_alias=True)
-    # patch 子树改用 exclude_unset 导出（Spec 010 DD-06）：Style 的 11 个字段都有
+    # patch 子树改用 exclude_unset 导出（Spec 010 DD-06）：Style 的 31 个字段都有
     # None 默认值，普通导出会把「候选未提及的样式」写成 null，与「显式 null = 删除
     # 该样式」混淆，前端无法据此还原本轮真实的 style 变更。exclude_unset 只保留候选
     # 真正给出的键（含显式 null），因此 echo 与候选逐键一致；update_props 只含无默认
@@ -372,7 +430,6 @@ async def refine_dsl(
 _GENERATION_ERROR_HTTP_MAP: dict[str, int] = {
     "invalid_request_structure": 422,
     "invalid_prompt": 422,
-    "unrecognized_intent": 422,
     "provider_error": 502,
     "invalid_generated_document": 502,
     "internal_error": 500,
@@ -385,7 +442,7 @@ _GENERATION_ERROR_HTTP_MAP: dict[str, int] = {
     responses={
         400: {"model": GenerateFailure, "description": "JSON 解析失败或请求体为空"},
         415: {"model": GenerateFailure, "description": "不支持的 Content-Type"},
-        422: {"model": GenerateFailure, "description": "请求结构/prompt/意图校验失败"},
+        422: {"model": GenerateFailure, "description": "请求结构/prompt 校验失败"},
         500: {"model": GenerateFailure, "description": "服务内部错误"},
         502: {"model": GenerateFailure, "description": "Provider/候选文档问题"},
     },
@@ -406,6 +463,8 @@ async def generate_dsl(
 ) -> JSONResponse | GenerateSuccess:
     """初稿生成端点 — 由一句自然语言需求产出完整 DSL 初稿"""
 
+    request_id = _request_id(request)
+
     # 检查 Content-Type
     content_type = request.headers.get("content-type", "")
     if not content_type.lower().startswith("application/json"):
@@ -413,12 +472,13 @@ async def generate_dsl(
             status_code=415,
             content=GenerateFailure(
                 success=False,
+                request_id=request_id,
                 error=ValidationErrorDetail(
                     code="unsupported_media_type",
-                    message="Content-Type 必须为 application/json",
+                    message=_user_message("unsupported_media_type", "Content-Type 必须为 application/json"),
                     issues=[],
                 ),
-            ).model_dump(mode="json"),
+            ).model_dump(mode="json", by_alias=True),
         )
 
     # 读取原始 body
@@ -430,12 +490,13 @@ async def generate_dsl(
             status_code=400,
             content=GenerateFailure(
                 success=False,
+                request_id=request_id,
                 error=ValidationErrorDetail(
                     code="invalid_json",
                     message="请求体为空",
                     issues=[],
                 ),
-            ).model_dump(mode="json"),
+            ).model_dump(mode="json", by_alias=True),
         )
 
     # JSON 解析
@@ -446,16 +507,17 @@ async def generate_dsl(
             status_code=400,
             content=GenerateFailure(
                 success=False,
+                request_id=request_id,
                 error=ValidationErrorDetail(
                     code="invalid_json",
-                    message="JSON 解析失败",
+                    message=_user_message("invalid_json", "JSON 解析失败"),
                     issues=[
                         ValidationIssue(
                             path="$", code="invalid_json", message="JSON 解析失败"
                         )
                     ],
                 ),
-            ).model_dump(mode="json"),
+            ).model_dump(mode="json", by_alias=True),
         )
 
     # 请求模型校验
@@ -466,9 +528,10 @@ async def generate_dsl(
             status_code=422,
             content=GenerateFailure(
                 success=False,
+                request_id=request_id,
                 error=ValidationErrorDetail(
                     code="invalid_request_structure",
-                    message="请求结构校验失败",
+                    message=_user_message("invalid_request_structure", "请求结构校验失败"),
                     issues=[
                         ValidationIssue(
                             path="$",
@@ -477,47 +540,94 @@ async def generate_dsl(
                         )
                     ],
                 ),
-            ).model_dump(mode="json"),
+            ).model_dump(mode="json", by_alias=True),
         )
 
-    # 调用 Generation Pipeline
+    # 调用 Generation Pipeline（三层收敛在 Pipeline/Provider 内部完成）
+    started = time.perf_counter()
     try:
-        document = await generate_document(prompt=req.prompt, provider=provider)
+        outcome = await generate_document(prompt=req.prompt, provider=provider)
     except GenerationError as e:
+        duration_ms = int((time.perf_counter() - started) * 1000)
         status_code = _GENERATION_ERROR_HTTP_MAP.get(e.code, 500)
         issues = [
             ValidationIssue(path=iss.path, code=iss.code, message=iss.message)
             for iss in e.issues
         ]
+        logger.warning(
+            "request_id=%s generation_failed code=%s attempts=%d repair_used=%s "
+            "duration_ms=%d issues=%s",
+            request_id,
+            e.code,
+            e.attempts,
+            e.repair_used,
+            duration_ms,
+            [(iss.path, iss.code, iss.message) for iss in issues],
+        )
         return JSONResponse(
             status_code=status_code,
             content=GenerateFailure(
                 success=False,
+                request_id=request_id,
                 error=ValidationErrorDetail(
                     code=e.code,
-                    message=e.message,
+                    message=_user_message(e.code, e.message),
                     issues=issues,
                 ),
-            ).model_dump(mode="json"),
+            ).model_dump(mode="json", by_alias=True),
         )
     except Exception:
+        logger.exception("request_id=%s generation unexpected error", request_id)
         return JSONResponse(
             status_code=500,
             content=GenerateFailure(
                 success=False,
+                request_id=request_id,
                 error=ValidationErrorDetail(
                     code="internal_error",
-                    message="An unexpected internal error occurred",
+                    message=_user_message("internal_error", "An unexpected internal error occurred"),
                     issues=[],
                 ),
-            ).model_dump(mode="json"),
+            ).model_dump(mode="json", by_alias=True),
         )
+
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    config = load_model_config()
+    meta = GenerateMeta(
+        request_id=request_id,
+        provider=PROVIDER_OPENAI_COMPATIBLE,
+        model=config.generation_model,
+        structured_output=current_response_mode(),
+        attempts=outcome.attempts,
+        repair_used=outcome.repair_used,
+        normalization=[
+            NormalizationEntry(
+                path=record.path,
+                kind=record.kind,
+                before=record.before,
+                after=record.after,
+            )
+            for record in outcome.normalization
+        ],
+        duration_ms=duration_ms,
+    )
+    logger.info(
+        "request_id=%s generation_succeeded attempts=%d repair_used=%s "
+        "normalization=%d structured_output=%s duration_ms=%d",
+        request_id,
+        outcome.attempts,
+        outcome.repair_used,
+        len(outcome.normalization),
+        meta.structured_output,
+        duration_ms,
+    )
 
     # 成功
     return JSONResponse(
         status_code=200,
         content=GenerateSuccess(
             success=True,
-            document=document.model_dump(mode="json"),
-        ).model_dump(mode="json"),
+            document=outcome.document.model_dump(mode="json"),
+            meta=meta,
+        ).model_dump(mode="json", by_alias=True),
     )

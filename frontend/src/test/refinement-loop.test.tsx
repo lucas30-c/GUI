@@ -1048,11 +1048,13 @@ describe('F. instruction 控件与键盘交互', () => {
 // --- G. 配置与类型安全（AC-68 ~ AC-71）---
 
 describe('G. 配置与类型安全', () => {
-  it('AC-68: vite.config.ts 含 /api → http://127.0.0.1:8000 的 dev proxy', () => {
+  it('AC-68: vite.config.ts 含 /api → 8000（默认）的 dev proxy', () => {
     const source = readSource('vite.config.ts')
     expect(source).toContain('proxy')
     expect(source).toContain("'/api'")
-    expect(source).toContain("target: 'http://127.0.0.1:8000'")
+    // E2E 双轨后代理目标可由 GENUI_E2E_API_PORT 覆盖，默认仍是 8000
+    expect(source).toContain("'8000'")
+    expect(source).toContain('GENUI_E2E_API_PORT')
     expect(source).toContain('changeOrigin: true')
   })
 
@@ -1081,14 +1083,17 @@ describe('G. 配置与类型安全', () => {
     }
   })
 
-  it('AC-76(静态): playwright.config.ts 用 webServer 数组同时启动 FastAPI 与 Vite', () => {
+  it('AC-76(静态): playwright.config.ts 用 webServer 数组双轨启动后端与 Vite', () => {
     const source = readSource('playwright.config.ts')
     expect(source).toContain("testDir: './e2e'")
     expect(source).toContain("baseURL: 'http://127.0.0.1:5173'")
     expect(source).toContain('webServer: [')
+    // 轨道 A：确定性替身后端；轨道 B：生产 app + 真实凭证
+    expect(source).toContain('uvicorn tests.e2e_app:app')
     expect(source).toContain('uvicorn genui_api.main:app')
-    expect(source).toContain("command: 'npm run dev'")
-    expect(source).toContain('reuseExistingServer: !process.env.CI')
+    expect(source).toContain('npm run dev')
+    // 干净进程：禁止复用未知旧服务
+    expect(source).toContain('reuseExistingServer: false')
   })
 })
 
